@@ -19,7 +19,8 @@ use crate::io::sqlite_store::SqliteStore;
 use crate::io::utils::{read_node_metrics, write_node_metrics};
 use crate::io::vss_store::VssStore;
 use crate::liquidity::{
-	LSPS1ClientConfig, LSPS2ClientConfig, LSPS2ServiceConfig, LiquiditySourceBuilder,
+	LSPS1ClientConfig, LSPS2ClientConfig, LSPS2ServiceConfig, LSPS5ClientConfig,
+	LSPS5ServiceConfig, LiquiditySourceBuilder,
 };
 use crate::logger::{log_error, log_info, LdkLogger, LogLevel, LogWriter, Logger};
 use crate::message_handler::NodeCustomMessageHandler;
@@ -108,6 +109,10 @@ struct LiquiditySourceConfig {
 	lsps2_client: Option<LSPS2ClientConfig>,
 	// Act as an LSPS2 service.
 	lsps2_service: Option<LSPS2ServiceConfig>,
+	/// Act as an LSPS5 client connecting to the given service.
+	lsps5_client: Option<LSPS5ClientConfig>,
+	// Act as an LSPS5 service.
+	lsps5_service: Option<LSPS5ServiceConfig>,
 }
 
 #[derive(Clone)]
@@ -375,6 +380,27 @@ impl NodeBuilder {
 		let liquidity_source_config =
 			self.liquidity_source_config.get_or_insert(LiquiditySourceConfig::default());
 		liquidity_source_config.lsps2_service = Some(service_config);
+		self
+	}
+
+	/// Configures the [`Node`] instance to source inbound liquidity from the given
+	pub fn set_liquidity_source_lsps5(
+		&mut self, node_id: PublicKey, address: SocketAddress,
+	) -> &mut Self {
+		let liquidity_source_config =
+			self.liquidity_source_config.get_or_insert(LiquiditySourceConfig::default());
+		let lsps5_client_config = LSPS5ClientConfig { node_id, address };
+		liquidity_source_config.lsps5_client = Some(lsps5_client_config);
+		self
+	}
+
+	/// Configures the [`Node`] instance to provide an [LSPS5] service
+	pub fn set_liquidity_provider_lsps5(
+		&mut self, service_config: LSPS5ServiceConfig,
+	) -> &mut Self {
+		let liquidity_source_config =
+			self.liquidity_source_config.get_or_insert(LiquiditySourceConfig::default());
+		liquidity_source_config.lsps5_service = Some(service_config);
 		self
 	}
 
@@ -1268,8 +1294,8 @@ fn build_with_store_internal(
 
 	// Give ChannelMonitors to ChainMonitor
 	for (_blockhash, channel_monitor) in channel_monitors.into_iter() {
-		let funding_outpoint = channel_monitor.get_funding_txo().0;
-		chain_monitor.watch_channel(funding_outpoint, channel_monitor).map_err(|e| {
+		let channel_id = channel_monitor.channel_id();
+		chain_monitor.watch_channel(channel_id, channel_monitor).map_err(|e| {
 			log_error!(logger, "Failed to watch channel monitor: {:?}", e);
 			BuildError::InvalidChannelMonitor
 		})?;
@@ -1325,7 +1351,6 @@ fn build_with_store_internal(
 			))
 		},
 	};
-
 	let (liquidity_source, custom_message_handler) =
 		if let Some(lsc) = liquidity_source_config.as_ref() {
 			let mut liquidity_source_builder = LiquiditySourceBuilder::new(
@@ -1366,13 +1391,27 @@ fn build_with_store_internal(
 				liquidity_source_builder.lsps2_service(promise_secret, config.clone())
 			});
 
+			lsc.lsps5_client.as_ref().map(|config| {
+				liquidity_source_builder.lsps5_client(config.node_id, config.address.clone())
+			});
+			lsc.lsps5_service.as_ref().map(|config| {
+				liquidity_source_builder.lsps5_service(promise_secret, config.clone())
+			});
+
 			let liquidity_source = Arc::new(liquidity_source_builder.build());
 			let custom_message_handler =
 				Arc::new(NodeCustomMessageHandler::new_liquidity(Arc::clone(&liquidity_source)));
+
 			(Some(liquidity_source), custom_message_handler)
 		} else {
 			(None, Arc::new(NodeCustomMessageHandler::new_ignoring()))
 		};
+
+	let liquidity_manager = if let Some(liquidity_source) = liquidity_source.as_ref() {
+		Some(Arc::clone(&liquidity_source.liquidity_manager))
+	} else {
+		None
+	};
 
 	let msg_handler = match gossip_source.as_gossip_sync() {
 		GossipSync::P2P(p2p_gossip_sync) => MessageHandler {
@@ -1410,7 +1449,7 @@ fn build_with_store_internal(
 		Arc::clone(&keys_manager),
 	));
 
-	liquidity_source.as_ref().map(|l| l.set_peer_manager(Arc::clone(&peer_manager)));
+	// liquidity_source.as_ref().map(|l| l.set_peer_manager(Arc::clone(&peer_manager)));
 
 	gossip_source.set_gossip_verifier(
 		Arc::clone(&chain_source),
@@ -1502,6 +1541,7 @@ fn build_with_store_internal(
 		output_sweeper,
 		peer_manager,
 		onion_messenger,
+		liquidity_manager,
 		connection_manager,
 		keys_manager,
 		network_graph,

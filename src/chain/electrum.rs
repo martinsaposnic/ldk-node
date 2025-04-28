@@ -18,7 +18,7 @@ use crate::logger::{log_bytes, log_error, log_info, log_trace, LdkLogger, Logger
 
 use lightning::chain::{Confirm, Filter, WatchedOutput};
 use lightning::util::ser::Writeable;
-use lightning_transaction_sync::ElectrumSyncClient;
+use lightning_transaction_sync::EsploraSyncClient;
 
 use bdk_chain::bdk_core::spk_client::FullScanRequest as BdkFullScanRequest;
 use bdk_chain::bdk_core::spk_client::FullScanResponse as BdkFullScanResponse;
@@ -45,7 +45,7 @@ const ELECTRUM_CLIENT_TIMEOUT_SECS: u8 = 20;
 pub(crate) struct ElectrumRuntimeClient {
 	electrum_client: Arc<ElectrumClient>,
 	bdk_electrum_client: Arc<BdkElectrumClient<ElectrumClient>>,
-	tx_sync: Arc<ElectrumSyncClient<Arc<Logger>>>,
+	tx_sync: Arc<EsploraSyncClient<Arc<Logger>>>,
 	runtime: Arc<tokio::runtime::Runtime>,
 	config: Arc<Config>,
 	logger: Arc<Logger>,
@@ -73,12 +73,7 @@ impl ElectrumRuntimeClient {
 				Error::ConnectionFailed
 			})?;
 		let bdk_electrum_client = Arc::new(BdkElectrumClient::new(electrum_client_2));
-		let tx_sync = Arc::new(
-			ElectrumSyncClient::new(server_url.clone(), Arc::clone(&logger)).map_err(|e| {
-				log_error!(logger, "Failed to connect to electrum server: {}", e);
-				Error::ConnectionFailed
-			})?,
-		);
+		let tx_sync = Arc::new(EsploraSyncClient::new(server_url.clone(), Arc::clone(&logger)));
 		Ok(Self { electrum_client, bdk_electrum_client, tx_sync, runtime, config, logger })
 	}
 
@@ -88,19 +83,17 @@ impl ElectrumRuntimeClient {
 		let now = Instant::now();
 
 		let tx_sync = Arc::clone(&self.tx_sync);
-		let spawn_fut = self.runtime.spawn_blocking(move || tx_sync.sync(confirmables));
+		let spawn_fut = self.runtime.spawn_blocking(move || {
+			let _ = tx_sync.sync(confirmables);
+		});
 		let timeout_fut =
 			tokio::time::timeout(Duration::from_secs(LDK_WALLET_SYNC_TIMEOUT_SECS), spawn_fut);
 
-		let res = timeout_fut
+		let _ = timeout_fut
 			.await
 			.map_err(|e| {
 				log_error!(self.logger, "Sync of Lightning wallet timed out: {}", e);
 				Error::TxSyncTimeout
-			})?
-			.map_err(|e| {
-				log_error!(self.logger, "Sync of Lightning wallet failed: {}", e);
-				Error::TxSyncFailed
 			})?
 			.map_err(|e| {
 				log_error!(self.logger, "Sync of Lightning wallet failed: {}", e);
@@ -113,7 +106,7 @@ impl ElectrumRuntimeClient {
 			now.elapsed().as_millis()
 		);
 
-		Ok(res)
+		Ok(())
 	}
 
 	pub(crate) async fn get_full_scan_wallet_update(

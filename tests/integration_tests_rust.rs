@@ -1129,12 +1129,13 @@ fn unified_qr_send_receive() {
 
 #[test]
 fn lsps2_client_service_integration() {
+	println!("1");
 	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
 
 	let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
 
 	let sync_config = EsploraSyncConfig { background_sync_config: None };
-
+	println!("2");
 	// Setup three nodes: service, client, and payer
 	let channel_opening_fee_ppm = 10_000;
 	let channel_over_provisioning_ppm = 100_000;
@@ -1178,7 +1179,7 @@ fn lsps2_client_service_integration() {
 	let payer_addr = payer_node.onchain_payment().new_address().unwrap();
 
 	let premine_amount_sat = 10_000_000;
-
+	println!("Funding service_node, client_node, and payer_node with {} sat!", premine_amount_sat);
 	premine_and_distribute_funds(
 		&bitcoind.client,
 		&electrsd.client,
