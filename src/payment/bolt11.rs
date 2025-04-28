@@ -22,7 +22,6 @@ use crate::payment::SendingParameters;
 use crate::peer_store::{PeerInfo, PeerStore};
 use crate::types::ChannelManager;
 
-use lightning::ln::bolt11_payment;
 use lightning::ln::channelmanager::{
 	Bolt11InvoiceParameters, PaymentId, RecipientOnionFields, Retry, RetryableSendFailure,
 };
@@ -105,11 +104,28 @@ impl Bolt11Payment {
 		if rt_lock.is_none() {
 			return Err(Error::NotRunning);
 		}
+		let payee = invoice.recover_payee_pub_key();
+		let payment_hash = PaymentHash(invoice.payment_hash().to_byte_array());
+		let secret = invoice.payment_secret().clone();
+		let value_msat = invoice.amount_milli_satoshis().expect("invoice must have an amount");
 
-		let (payment_hash, recipient_onion, mut route_params) = bolt11_payment::payment_parameters_from_invoice(&invoice).map_err(|_| {
-			log_error!(self.logger, "Failed to send payment due to the given invoice being \"zero-amount\". Please use send_using_amount instead.");
-			Error::InvalidInvoice
-		})?;
+		// 2. Build the router‑level payment params:
+		let mut pay_params =
+			PaymentParameters::from_node_id(payee, invoice.min_final_cltv_expiry_delta() as u32)
+				.with_route_hints(invoice.route_hints())
+				.map_err(|_| Error::InvalidInvoice)?;
+
+		if let Some(features) = invoice.features() {
+			pay_params = pay_params
+				.with_bolt11_features(features.clone())
+				.map_err(|_| Error::InvalidInvoice)?;
+		}
+
+		// 3. Turn them into RouteParameters + value:
+		let mut route_params =
+			lightning::routing::router::RouteParameters::from_payment_params_and_value(
+				pay_params, value_msat,
+			);
 
 		let payment_id = PaymentId(invoice.payment_hash().to_byte_array());
 		if let Some(payment) = self.payment_store.get(&payment_id) {
@@ -141,7 +157,7 @@ impl Bolt11Payment {
 
 		match self.channel_manager.send_payment(
 			payment_hash,
-			recipient_onion,
+			RecipientOnionFields::secret_only(secret),
 			payment_id,
 			route_params,
 			retry_strategy,
@@ -714,10 +730,26 @@ impl Bolt11Payment {
 			return Err(Error::NotRunning);
 		}
 
-		let (_payment_hash, _recipient_onion, route_params) = bolt11_payment::payment_parameters_from_invoice(&invoice).map_err(|_| {
-			log_error!(self.logger, "Failed to send probes due to the given invoice being \"zero-amount\". Please use send_probes_using_amount instead.");
-			Error::InvalidInvoice
-		})?;
+		let payee = invoice.recover_payee_pub_key();
+		let value_msat = invoice.amount_milli_satoshis().expect("invoice must have an amount");
+
+		// 2. Build the router‑level payment params:
+		let mut pay_params =
+			PaymentParameters::from_node_id(payee, invoice.min_final_cltv_expiry_delta() as u32)
+				.with_route_hints(invoice.route_hints())
+				.map_err(|_| Error::InvalidInvoice)?;
+
+		if let Some(features) = invoice.features() {
+			pay_params = pay_params
+				.with_bolt11_features(features.clone())
+				.map_err(|_| Error::InvalidInvoice)?;
+		}
+
+		// 3. Turn them into RouteParameters + value:
+		let route_params =
+			lightning::routing::router::RouteParameters::from_payment_params_and_value(
+				pay_params, value_msat,
+			);
 
 		let liquidity_limit_multiplier = Some(self.config.probing_liquidity_limit_multiplier);
 
@@ -745,10 +777,7 @@ impl Bolt11Payment {
 		if rt_lock.is_none() {
 			return Err(Error::NotRunning);
 		}
-
-		let (_payment_hash, _recipient_onion, route_params) = if let Some(invoice_amount_msat) =
-			invoice.amount_milli_satoshis()
-		{
+		let route_params = if let Some(invoice_amount_msat) = invoice.amount_milli_satoshis() {
 			if amount_msat < invoice_amount_msat {
 				log_error!(
 					self.logger,
@@ -756,15 +785,43 @@ impl Bolt11Payment {
 				return Err(Error::InvalidAmount);
 			}
 
-			bolt11_payment::payment_parameters_from_invoice(&invoice).map_err(|_| {
-				log_error!(self.logger, "Failed to send probes due to the given invoice unexpectedly being \"zero-amount\".");
-				Error::InvalidInvoice
-			})?
+			let payee = invoice.recover_payee_pub_key();
+			let value_msat = invoice.amount_milli_satoshis().expect("invoice must have an amount");
+			let mut pay_params = PaymentParameters::from_node_id(
+				payee,
+				invoice.min_final_cltv_expiry_delta() as u32,
+			)
+			.with_route_hints(invoice.route_hints())
+			.map_err(|_| Error::InvalidInvoice)?;
+
+			if let Some(features) = invoice.features() {
+				pay_params = pay_params
+					.with_bolt11_features(features.clone())
+					.map_err(|_| Error::InvalidInvoice)?;
+			}
+
+			lightning::routing::router::RouteParameters::from_payment_params_and_value(
+				pay_params, value_msat,
+			)
 		} else {
-			bolt11_payment::payment_parameters_from_variable_amount_invoice(&invoice, amount_msat).map_err(|_| {
-				log_error!(self.logger, "Failed to send probes due to the given invoice unexpectedly being not \"zero-amount\".");
-				Error::InvalidInvoice
-			})?
+			let payee = invoice.recover_payee_pub_key();
+			let mut pay_params = PaymentParameters::from_node_id(
+				payee,
+				invoice.min_final_cltv_expiry_delta() as u32,
+			)
+			.with_route_hints(invoice.route_hints())
+			.map_err(|_| Error::InvalidInvoice)?;
+
+			if let Some(features) = invoice.features() {
+				pay_params = pay_params
+					.with_bolt11_features(features.clone())
+					.map_err(|_| Error::InvalidInvoice)?;
+			}
+
+			lightning::routing::router::RouteParameters::from_payment_params_and_value(
+				pay_params,
+				amount_msat,
+			)
 		};
 
 		let liquidity_limit_multiplier = Some(self.config.probing_liquidity_limit_multiplier);
