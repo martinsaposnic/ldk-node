@@ -803,6 +803,17 @@ impl ArcedNodeBuilder {
 		self.inner.write().unwrap().set_liquidity_provider_lsps2(service_config);
 	}
 
+	/// Configures the [`Node`] instance to source inbound liquidity from the given
+	/// [bLIP-50 / LSPS5] service.
+	pub fn set_liquidity_source_lsps5(&self, node_id: PublicKey, address: SocketAddress) {
+		self.inner.write().unwrap().set_liquidity_source_lsps5(node_id, address);
+	}
+
+	/// Configures the [`Node`] instance to provide an [LSPS5] service
+	pub fn set_liquidity_provider_lsps5(&self, service_config: LSPS5ServiceConfig) {
+		self.inner.write().unwrap().set_liquidity_provider_lsps5(service_config);
+	}
+
 	/// Sets the used storage directory path.
 	pub fn set_storage_dir_path(&self, storage_dir_path: String) {
 		self.inner.write().unwrap().set_storage_dir_path(storage_dir_path);
