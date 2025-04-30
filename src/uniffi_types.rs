@@ -31,13 +31,14 @@ pub use lightning::offers::refund::Refund;
 pub use lightning::routing::gossip::{NodeAlias, NodeId, RoutingFees};
 pub use lightning::util::string::UntrustedString;
 
+pub use lightning_liquidity::lsps0::ser::LSPSDateTime;
 pub use lightning_types::payment::{PaymentHash, PaymentPreimage, PaymentSecret};
 
 pub use lightning_invoice::{Bolt11Invoice, Description};
 
-pub use lightning_liquidity::lsps1::msgs::ChannelInfo as ChannelOrderInfo;
+pub use lightning_liquidity::lsps1::msgs::LSPS1ChannelInfo as ChannelOrderInfo;
 pub use lightning_liquidity::lsps1::msgs::{
-	Bolt11PaymentInfo, OrderId, OrderParameters, PaymentState,
+	LSPS1Bolt11PaymentInfo, LSPS1OrderId, LSPS1OrderParams, LSPS1PaymentState,
 };
 
 pub use bitcoin::{Address, BlockHash, FeeRate, Network, OutPoint, Txid};
@@ -46,7 +47,7 @@ pub use bip39::Mnemonic;
 
 pub use vss_client::headers::{VssHeaderProvider, VssHeaderProviderError};
 
-pub type DateTime = chrono::DateTime<chrono::Utc>;
+pub type DateTime = LSPSDateTime;
 
 use crate::UniffiCustomTypeConverter;
 
@@ -405,7 +406,7 @@ impl From<lightning_invoice::Bolt11InvoiceDescription> for Bolt11InvoiceDescript
 	}
 }
 
-impl UniffiCustomTypeConverter for OrderId {
+impl UniffiCustomTypeConverter for LSPS1OrderId {
 	type Builtin = String;
 
 	fn into_custom(val: Self::Builtin) -> uniffi::Result<Self> {
