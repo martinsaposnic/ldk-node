@@ -9,7 +9,6 @@
 
 use crate::chain::ChainSource;
 use crate::connection::ConnectionManager;
-use crate::event::EventQueue;
 use crate::logger::{log_debug, log_error, log_info, LdkLogger, Logger};
 use crate::types::{ChannelManager, KeysManager, LiquidityManager, PeerManager, Wallet};
 use crate::{total_anchor_channels_reserve_sats, Config, Error};
@@ -1996,14 +1995,14 @@ type PaymentInfo = lightning_liquidity::lsps1::msgs::LSPS1PaymentInfo;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaymentInfo {
 	/// A Lightning payment using BOLT 11.
-	pub bolt11: Option<lightning_liquidity::lsps1::msgs::Bolt11PaymentInfo>,
+	pub bolt11: Option<lightning_liquidity::lsps1::msgs::LSPS1Bolt11PaymentInfo>,
 	/// An onchain payment.
 	pub onchain: Option<OnchainPaymentInfo>,
 }
 
 #[cfg(feature = "uniffi")]
-impl From<lightning_liquidity::lsps1::msgs::PaymentInfo> for PaymentInfo {
-	fn from(value: lightning_liquidity::lsps1::msgs::PaymentInfo) -> Self {
+impl From<lightning_liquidity::lsps1::msgs::LSPS1PaymentInfo> for PaymentInfo {
+	fn from(value: lightning_liquidity::lsps1::msgs::LSPS1PaymentInfo) -> Self {
 		PaymentInfo { bolt11: value.bolt11, onchain: value.onchain.map(|o| o.into()) }
 	}
 }
@@ -2013,9 +2012,9 @@ impl From<lightning_liquidity::lsps1::msgs::PaymentInfo> for PaymentInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnchainPaymentInfo {
 	/// Indicates the current state of the payment.
-	pub state: lightning_liquidity::lsps1::msgs::PaymentState,
+	pub state: lightning_liquidity::lsps1::msgs::LSPS1PaymentState,
 	/// The datetime when the payment option expires.
-	pub expires_at: chrono::DateTime<chrono::Utc>,
+	pub expires_at: lightning_liquidity::lsps0::ser::LSPSDateTime,
 	/// The total fee the LSP will charge to open this channel in satoshi.
 	pub fee_total_sat: u64,
 	/// The amount the client needs to pay to have the requested channel openend.
@@ -2034,8 +2033,8 @@ pub struct OnchainPaymentInfo {
 }
 
 #[cfg(feature = "uniffi")]
-impl From<lightning_liquidity::lsps1::msgs::OnchainPaymentInfo> for OnchainPaymentInfo {
-	fn from(value: lightning_liquidity::lsps1::msgs::OnchainPaymentInfo) -> Self {
+impl From<lightning_liquidity::lsps1::msgs::LSPS1OnchainPaymentInfo> for OnchainPaymentInfo {
+	fn from(value: lightning_liquidity::lsps1::msgs::LSPS1OnchainPaymentInfo) -> Self {
 		Self {
 			state: value.state,
 			expires_at: value.expires_at,

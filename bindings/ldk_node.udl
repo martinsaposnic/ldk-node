@@ -245,7 +245,7 @@ interface LSPS1Liquidity {
 	[Throws=NodeError]
 	LSPS1OrderStatus request_channel(u64 lsp_balance_sat, u64 client_balance_sat, u32 channel_expiry_blocks, boolean announce_channel);
 	[Throws=NodeError]
-	LSPS1OrderStatus check_order_status(OrderId order_id);
+	LSPS1OrderStatus check_order_status(LSPS1OrderId order_id);
 };
 
 [Error]
@@ -459,13 +459,13 @@ dictionary CustomTlvRecord {
 };
 
 dictionary LSPS1OrderStatus {
-	OrderId order_id;
-	OrderParameters order_params;
+	LSPS1OrderId order_id;
+	LSPS1OrderParams order_params;
 	PaymentInfo payment_options;
 	ChannelOrderInfo? channel_state;
 };
 
-dictionary OrderParameters {
+dictionary LSPS1OrderParams {
 	u64 lsp_balance_sat;
 	u64 client_balance_sat;
 	u16 required_channel_confirmations;
@@ -476,12 +476,12 @@ dictionary OrderParameters {
 };
 
 dictionary PaymentInfo {
-	Bolt11PaymentInfo? bolt11;
+	LSPS1Bolt11PaymentInfo? bolt11;
 	OnchainPaymentInfo? onchain;
 };
 
-dictionary Bolt11PaymentInfo {
-	PaymentState state;
+dictionary LSPS1Bolt11PaymentInfo {
+	LSPS1PaymentState state;
 	DateTime expires_at;
 	u64 fee_total_sat;
 	u64 order_total_sat;
@@ -489,7 +489,7 @@ dictionary Bolt11PaymentInfo {
 };
 
 dictionary OnchainPaymentInfo {
-	PaymentState state;
+	LSPS1PaymentState state;
 	DateTime expires_at;
 	u64 fee_total_sat;
 	u64 order_total_sat;
@@ -505,7 +505,7 @@ dictionary ChannelOrderInfo {
 	DateTime expires_at;
 };
 
-enum PaymentState {
+enum LSPS1PaymentState {
 	"ExpectPayment",
 	"Paid",
 	"Refunded",
@@ -759,7 +759,7 @@ typedef string UntrustedString;
 typedef string NodeAlias;
 
 [Custom]
-typedef string OrderId;
+typedef string LSPS1OrderId;
 
 [Custom]
 typedef string DateTime;
