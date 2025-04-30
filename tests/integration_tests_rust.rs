@@ -16,12 +16,12 @@ use common::{
 	TestChainSource, TestSyncStore,
 };
 
-use ldk_node::config::EsploraSyncConfig;
 use ldk_node::liquidity::LSPS2ServiceConfig;
 use ldk_node::payment::{
 	ConfirmationStatus, PaymentDirection, PaymentKind, PaymentStatus, QrPaymentResult,
 	SendingParameters,
 };
+use ldk_node::{config::EsploraSyncConfig, liquidity::LSPS5ServiceConfig};
 use ldk_node::{Builder, Event, NodeError};
 
 use lightning::ln::channelmanager::PaymentId;
@@ -1129,13 +1129,13 @@ fn unified_qr_send_receive() {
 
 #[test]
 fn lsps2_client_service_integration() {
-	println!("1");
+	println!("Starting lsps2_client_service_integration test");
+	let _ = init_log_logger(LevelFilter::Debug);
 	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
-
+	println!("Bitcoind and Electrsd setup complete");
 	let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
-
+	println!("Esplora URL: {}", esplora_url);
 	let sync_config = EsploraSyncConfig { background_sync_config: None };
-	println!("2");
 	// Setup three nodes: service, client, and payer
 	let channel_opening_fee_ppm = 10_000;
 	let channel_over_provisioning_ppm = 100_000;
@@ -1150,11 +1150,12 @@ fn lsps2_client_service_integration() {
 		min_channel_opening_fee_msat: 0,
 		max_client_to_self_delay: 1024,
 	};
-
+	println!("LSPS2 service config: {:?}", lsps2_service_config);
 	let service_config = random_config(true);
 	setup_builder!(service_builder, service_config.node_config);
 	service_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
 	service_builder.set_liquidity_provider_lsps2(lsps2_service_config);
+	service_builder.set_liquidity_provider_lsps5(LSPS5ServiceConfig {});
 	let service_node = service_builder.build().unwrap();
 	service_node.start().unwrap();
 
@@ -1164,7 +1165,8 @@ fn lsps2_client_service_integration() {
 	let client_config = random_config(true);
 	setup_builder!(client_builder, client_config.node_config);
 	client_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
-	client_builder.set_liquidity_source_lsps2(service_node_id, service_addr, None);
+	client_builder.set_liquidity_source_lsps2(service_node_id, service_addr.clone(), None);
+	client_builder.set_liquidity_source_lsps5(service_node_id, service_addr);
 	let client_node = client_builder.build().unwrap();
 	client_node.start().unwrap();
 
@@ -1186,20 +1188,20 @@ fn lsps2_client_service_integration() {
 		vec![service_addr, client_addr, payer_addr],
 		Amount::from_sat(premine_amount_sat),
 	);
+	println!("Funding complete!");
 	service_node.sync_wallets().unwrap();
 	client_node.sync_wallets().unwrap();
 	payer_node.sync_wallets().unwrap();
-
+	println!("Wallets synced!");
 	// Open a channel payer -> service that will allow paying the JIT invoice
-	println!("Opening channel payer_node -> service_node!");
 	open_channel(&payer_node, &service_node, 5_000_000, false, &electrsd);
-
+	println!("Channel opened!");
 	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 6);
 	service_node.sync_wallets().unwrap();
 	payer_node.sync_wallets().unwrap();
 	expect_channel_ready_event!(payer_node, service_node.node_id());
 	expect_channel_ready_event!(service_node, payer_node.node_id());
-
+	println!("Channel ready!");
 	let invoice_description =
 		Bolt11InvoiceDescription::Direct(Description::new(String::from("asdf")).unwrap());
 	let jit_amount_msat = 100_000_000;
@@ -1231,12 +1233,105 @@ fn lsps2_client_service_integration() {
 		_ => panic!("Unexpected payment kind"),
 	}
 
+	let result = client_node.lsps5_set_webhook(
+		"app_name123123312312".to_string(),
+		"https://localhost:900/notify".to_string(),
+	);
+
+	println!("Webhook set: {:?}", result);
+
 	let expected_channel_overprovisioning_msat =
 		(expected_received_amount_msat * channel_over_provisioning_ppm as u64) / 1_000_000;
 	let expected_channel_size_sat =
 		(expected_received_amount_msat + expected_channel_overprovisioning_msat) / 1000;
 	let channel_value_sats = client_node.list_channels().first().unwrap().channel_value_sats;
 	assert_eq!(channel_value_sats, expected_channel_size_sat);
+
+	let result = client_node.lsps5_list_webhook();
+
+	println!("Webhook list: {:?}", result);
+
+	println!("Generating regular invoice!");
+	let invoice_description =
+		Bolt11InvoiceDescription::Direct(Description::new(String::from("asdf")).unwrap());
+	let amount_msat = 5_000_000;
+	let invoice = client_node
+		.bolt11_payment()
+		.receive(amount_msat, &invoice_description.into(), 1024)
+		.unwrap();
+
+	// Have the payer_node pay the invoice, to check regular forwards service_node -> client_node
+	// are working as expected.
+	println!("Paying regular invoice!");
+	let payment_id = payer_node.bolt11_payment().send(&invoice, None).unwrap();
+	expect_payment_successful_event!(payer_node, Some(payment_id), None);
+	expect_payment_received_event!(client_node, amount_msat);
+}
+
+#[test]
+fn lsps5_client_service_integration() {
+	println!("Starting lsps2_client_service_integration test");
+	let _ = init_log_logger(LevelFilter::Debug);
+	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
+	println!("Bitcoind and Electrsd setup complete");
+	let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
+	println!("Esplora URL: {}", esplora_url);
+	let sync_config = EsploraSyncConfig { background_sync_config: None };
+	let service_config = random_config(true);
+	setup_builder!(service_builder, service_config.node_config);
+	service_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
+	service_builder.set_liquidity_provider_lsps5(LSPS5ServiceConfig {});
+	let service_node = service_builder.build().unwrap();
+	service_node.start().unwrap();
+
+	let service_node_id = service_node.node_id();
+	let service_addr = service_node.listening_addresses().unwrap().first().unwrap().clone();
+
+	let client_config = random_config(true);
+	setup_builder!(client_builder, client_config.node_config);
+	client_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
+	client_builder.set_liquidity_source_lsps5(service_node_id, service_addr);
+	let client_node = client_builder.build().unwrap();
+	client_node.start().unwrap();
+	let _ = client_node
+		.lsps5_set_webhook("app_name12345".to_string(), "https://www.whatever.com/".to_string());
+
+	let payer_config = random_config(true);
+	setup_builder!(payer_builder, payer_config.node_config);
+	payer_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
+	let payer_node = payer_builder.build().unwrap();
+	payer_node.start().unwrap();
+
+	let service_addr = service_node.onchain_payment().new_address().unwrap();
+	let client_addr = client_node.onchain_payment().new_address().unwrap();
+	let payer_addr = payer_node.onchain_payment().new_address().unwrap();
+
+	let premine_amount_sat = 10_000_000;
+	println!("Funding service_node, client_node, and payer_node with {} sat!", premine_amount_sat);
+	premine_and_distribute_funds(
+		&bitcoind.client,
+		&electrsd.client,
+		vec![service_addr, client_addr, payer_addr],
+		Amount::from_sat(premine_amount_sat),
+	);
+	println!("Funding complete!");
+	service_node.sync_wallets().unwrap();
+	client_node.sync_wallets().unwrap();
+	payer_node.sync_wallets().unwrap();
+	println!("Wallets synced!");
+	open_channel(&payer_node, &service_node, 1_000_000, false, &electrsd);
+	open_channel(&service_node, &client_node, 1_000_000, false, &electrsd);
+
+	println!("Channel opened!");
+	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 6);
+	service_node.sync_wallets().unwrap();
+	client_node.sync_wallets().unwrap();
+	payer_node.sync_wallets().unwrap();
+	expect_channel_ready_event!(payer_node, service_node.node_id());
+	expect_channel_ready_event!(service_node, payer_node.node_id());
+	expect_channel_ready_event!(client_node, service_node.node_id());
+	expect_channel_ready_event!(service_node, client_node.node_id());
+	println!("Channel ready!");
 
 	println!("Generating regular invoice!");
 	let invoice_description =
