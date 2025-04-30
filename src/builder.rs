@@ -1351,6 +1351,65 @@ fn build_with_store_internal(
 			))
 		},
 	};
+
+	let cur_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_err(|e| {
+		log_error!(logger, "Failed to get current time: {}", e);
+		BuildError::InvalidSystemTime
+	})?;
+
+	let output_sweeper = match io::utils::read_output_sweeper(
+		Arc::clone(&tx_broadcaster),
+		Arc::clone(&fee_estimator),
+		Arc::clone(&chain_source),
+		Arc::clone(&keys_manager),
+		Arc::clone(&kv_store),
+		Arc::clone(&logger),
+	) {
+		Ok(output_sweeper) => Arc::new(output_sweeper),
+		Err(e) => {
+			if e.kind() == std::io::ErrorKind::NotFound {
+				Arc::new(OutputSweeper::new(
+					channel_manager.current_best_block(),
+					Arc::clone(&tx_broadcaster),
+					Arc::clone(&fee_estimator),
+					Some(Arc::clone(&chain_source)),
+					Arc::clone(&keys_manager),
+					Arc::clone(&keys_manager),
+					Arc::clone(&kv_store),
+					Arc::clone(&logger),
+				))
+			} else {
+				return Err(BuildError::ReadFailed);
+			}
+		},
+	};
+
+	match io::utils::migrate_deprecated_spendable_outputs(
+		Arc::clone(&output_sweeper),
+		Arc::clone(&kv_store),
+		Arc::clone(&logger),
+	) {
+		Ok(()) => {
+			log_info!(logger, "Successfully migrated OutputSweeper data.");
+		},
+		Err(e) => {
+			log_error!(logger, "Failed to migrate OutputSweeper data: {}", e);
+			return Err(BuildError::ReadFailed);
+		},
+	}
+
+	let event_queue = match io::utils::read_event_queue(Arc::clone(&kv_store), Arc::clone(&logger))
+	{
+		Ok(event_queue) => Arc::new(event_queue),
+		Err(e) => {
+			if e.kind() == std::io::ErrorKind::NotFound {
+				Arc::new(EventQueue::new(Arc::clone(&kv_store), Arc::clone(&logger)))
+			} else {
+				return Err(BuildError::ReadFailed);
+			}
+		},
+	};
+
 	let (liquidity_source, custom_message_handler) =
 		if let Some(lsc) = liquidity_source_config.as_ref() {
 			let mut liquidity_source_builder = LiquiditySourceBuilder::new(
@@ -1433,10 +1492,16 @@ fn build_with_store_internal(
 		},
 	};
 
-	let cur_time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_err(|e| {
-		log_error!(logger, "Failed to get current time: {}", e);
-		BuildError::InvalidSystemTime
-	})?;
+	let peer_store = match io::utils::read_peer_info(Arc::clone(&kv_store), Arc::clone(&logger)) {
+		Ok(peer_store) => Arc::new(peer_store),
+		Err(e) => {
+			if e.kind() == std::io::ErrorKind::NotFound {
+				Arc::new(PeerStore::new(Arc::clone(&kv_store), Arc::clone(&logger)))
+			} else {
+				return Err(BuildError::ReadFailed);
+			}
+		},
+	};
 
 	let peer_manager = Arc::new(PeerManager::new(
 		msg_handler,
@@ -1449,7 +1514,7 @@ fn build_with_store_internal(
 		Arc::clone(&keys_manager),
 	));
 
-	// liquidity_source.as_ref().map(|l| l.set_peer_manager(Arc::clone(&peer_manager)));
+	liquidity_source.as_ref().map(|l| l.set_peer_manager(Arc::clone(&peer_manager)));
 
 	gossip_source.set_gossip_verifier(
 		Arc::clone(&chain_source),
@@ -1459,70 +1524,6 @@ fn build_with_store_internal(
 
 	let connection_manager =
 		Arc::new(ConnectionManager::new(Arc::clone(&peer_manager), Arc::clone(&logger)));
-
-	let output_sweeper = match io::utils::read_output_sweeper(
-		Arc::clone(&tx_broadcaster),
-		Arc::clone(&fee_estimator),
-		Arc::clone(&chain_source),
-		Arc::clone(&keys_manager),
-		Arc::clone(&kv_store),
-		Arc::clone(&logger),
-	) {
-		Ok(output_sweeper) => Arc::new(output_sweeper),
-		Err(e) => {
-			if e.kind() == std::io::ErrorKind::NotFound {
-				Arc::new(OutputSweeper::new(
-					channel_manager.current_best_block(),
-					Arc::clone(&tx_broadcaster),
-					Arc::clone(&fee_estimator),
-					Some(Arc::clone(&chain_source)),
-					Arc::clone(&keys_manager),
-					Arc::clone(&keys_manager),
-					Arc::clone(&kv_store),
-					Arc::clone(&logger),
-				))
-			} else {
-				return Err(BuildError::ReadFailed);
-			}
-		},
-	};
-
-	match io::utils::migrate_deprecated_spendable_outputs(
-		Arc::clone(&output_sweeper),
-		Arc::clone(&kv_store),
-		Arc::clone(&logger),
-	) {
-		Ok(()) => {
-			log_info!(logger, "Successfully migrated OutputSweeper data.");
-		},
-		Err(e) => {
-			log_error!(logger, "Failed to migrate OutputSweeper data: {}", e);
-			return Err(BuildError::ReadFailed);
-		},
-	}
-
-	let event_queue = match io::utils::read_event_queue(Arc::clone(&kv_store), Arc::clone(&logger))
-	{
-		Ok(event_queue) => Arc::new(event_queue),
-		Err(e) => {
-			if e.kind() == std::io::ErrorKind::NotFound {
-				Arc::new(EventQueue::new(Arc::clone(&kv_store), Arc::clone(&logger)))
-			} else {
-				return Err(BuildError::ReadFailed);
-			}
-		},
-	};
-
-	let peer_store = match io::utils::read_peer_info(Arc::clone(&kv_store), Arc::clone(&logger)) {
-		Ok(peer_store) => Arc::new(peer_store),
-		Err(e) => {
-			if e.kind() == std::io::ErrorKind::NotFound {
-				Arc::new(PeerStore::new(Arc::clone(&kv_store), Arc::clone(&logger)))
-			} else {
-				return Err(BuildError::ReadFailed);
-			}
-		},
-	};
 
 	let (stop_sender, _) = tokio::sync::watch::channel(());
 	let (event_handling_stopped_sender, _) = tokio::sync::watch::channel(());

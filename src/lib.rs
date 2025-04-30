@@ -101,6 +101,7 @@ pub use bitcoin;
 pub use lightning;
 pub use lightning_invoice;
 pub use lightning_liquidity;
+use lightning_liquidity::lsps0::ser::LSPSRequestId;
 pub use lightning_types;
 pub use vss_client;
 
@@ -151,7 +152,7 @@ use lightning::events::bump_transaction::Wallet as LdkWallet;
 use lightning::impl_writeable_tlv_based;
 use lightning::ln::channel_state::ChannelShutdownState;
 use lightning::ln::channelmanager::PaymentId;
-use lightning::ln::msgs::SocketAddress;
+use lightning::ln::msgs::{LightningError, SocketAddress};
 use lightning::routing::gossip::NodeAlias;
 
 use lightning_background_processor::process_events_async;
@@ -999,6 +1000,28 @@ impl Node {
 			self.liquidity_source.clone(),
 			Arc::clone(&self.logger),
 		))
+	}
+
+	/// lsps5 set webhook
+	pub fn lsps5_set_webhook(
+		&self, app_name: String, webhook_url: String,
+	) -> Result<LSPSRequestId, LightningError> {
+		if let Some(liquidity_source) = self.liquidity_source.as_ref() {
+			println!("lsps5_set_webhook");
+			liquidity_source.lsps5_set_webhook(app_name, webhook_url)
+		} else {
+			panic!("Liquidity source not set");
+		}
+	}
+
+	/// lsps5 list webhook
+	pub fn lsps5_list_webhook(&self) -> Result<LSPSRequestId, LightningError> {
+		if let Some(liquidity_source) = self.liquidity_source.as_ref() {
+			println!("lsps5_set_webhook");
+			liquidity_source.lsps5_list_webhook()
+		} else {
+			panic!("Liquidity source not set");
+		}
 	}
 
 	/// Retrieve a list of known channels.

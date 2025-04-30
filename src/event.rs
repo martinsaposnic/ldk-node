@@ -38,7 +38,6 @@ use lightning::ln::types::ChannelId;
 use lightning::routing::gossip::NodeId;
 use lightning::util::errors::APIError;
 use lightning::util::ser::{Readable, ReadableArgs, Writeable, Writer};
-
 use lightning_types::payment::{PaymentHash, PaymentPreimage};
 
 use lightning_liquidity::lsps2::utils::compute_opening_fee;
@@ -280,7 +279,7 @@ impl_writeable_tlv_based_enum!(Event,
 		(10, skimmed_fee_msat, option),
 		(12, claim_from_onchain_tx, required),
 		(14, outbound_amount_forwarded_msat, option),
-	}
+	},
 );
 
 pub struct EventQueue<L: Deref>
@@ -332,7 +331,8 @@ where
 	pub(crate) fn wait_next_event(&self) -> Event {
 		let locked_queue =
 			self.notifier.wait_while(self.queue.lock().unwrap(), |queue| queue.is_empty()).unwrap();
-		locked_queue.front().unwrap().clone()
+		let my_event = locked_queue.front().unwrap().clone();
+		my_event
 	}
 
 	pub(crate) fn event_handled(&self) -> Result<(), Error> {
@@ -487,6 +487,9 @@ where
 	}
 
 	pub async fn handle_event(&self, event: LdkEvent) -> Result<(), ReplayEvent> {
+		println!();
+		println!("Event: {:?}", event);
+		println!();
 		match event {
 			LdkEvent::FundingGenerationReady {
 				temporary_channel_id,
@@ -1264,7 +1267,7 @@ where
 				}
 
 				if let Some(liquidity_source) = self.liquidity_source.as_ref() {
-					liquidity_source.handle_payment_forwarded(next_channel_id);
+					liquidity_source.handle_payment_forwarded(next_channel_id, next_node_id);
 				}
 
 				let event = Event::PaymentForwarded {
