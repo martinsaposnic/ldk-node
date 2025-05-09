@@ -567,12 +567,11 @@ where
 				purpose,
 				amount_msat,
 				receiver_node_id: _,
-				via_channel_id: _,
-				via_user_channel_id: _,
 				claim_deadline,
 				onion_fields,
 				counterparty_skimmed_fee_msat,
 				payment_id: _,
+				via_channel_ids: _,
 			} => {
 				let payment_id = PaymentId(payment_hash.0);
 				if let Some(info) = self.payment_store.get(&payment_id) {
@@ -1044,9 +1043,9 @@ where
 			LdkEvent::PaymentPathFailed { .. } => {},
 			LdkEvent::ProbeSuccessful { .. } => {},
 			LdkEvent::ProbeFailed { .. } => {},
-			LdkEvent::HTLCHandlingFailed { failed_next_destination, .. } => {
+			LdkEvent::HTLCHandlingFailed { failure_type, .. } => {
 				if let Some(liquidity_source) = self.liquidity_source.as_ref() {
-					liquidity_source.handle_htlc_handling_failed(failed_next_destination);
+					liquidity_source.handle_htlc_handling_failed(failure_type);
 				}
 			},
 			LdkEvent::PendingHTLCsForwardable { time_forwardable } => {
