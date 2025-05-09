@@ -2,6 +2,7 @@
 BINDINGS_DIR="./bindings/swift"
 UNIFFI_BINDGEN_BIN="cargo run --manifest-path bindings/uniffi-bindgen/Cargo.toml"
 
+cargo build --release || exit 1
 # Generate Swift bindings
 $UNIFFI_BINDGEN_BIN generate bindings/ldk_node.udl --language swift -o "$BINDINGS_DIR" || exit 1
 
@@ -32,12 +33,12 @@ export IPHONEOS_DEPLOYMENT_TARGET=13.0
 export AWS_LC_SYS_EXTERNAL_BINDGEN=1
 
 # Build rust target libs
-# cargo build --profile release-smaller --features uniffi || exit 1
-# cargo build --profile release-smaller --features uniffi --target x86_64-apple-darwin || exit 1
-# cargo build --profile release-smaller --features uniffi --target aarch64-apple-darwin || exit 1
-# cargo build --profile release-smaller --features uniffi --target x86_64-apple-ios || exit 1
-# cargo build --profile release-smaller --features uniffi --target aarch64-apple-ios || exit 1
-# cargo build --release --features uniffi --target aarch64-apple-ios-sim || exit 1
+cargo build --profile release-smaller --features uniffi || exit 1
+cargo build --profile release-smaller --features uniffi --target x86_64-apple-darwin || exit 1
+cargo build --profile release-smaller --features uniffi --target aarch64-apple-darwin || exit 1
+cargo build --profile release-smaller --features uniffi --target x86_64-apple-ios || exit 1
+cargo build --profile release-smaller --features uniffi --target aarch64-apple-ios || exit 1
+cargo build --release --features uniffi --target aarch64-apple-ios-sim || exit 1
 
 # Combine ios-sim and apple-darwin (macos) libs for x86_64 and aarch64 (m1)
 mkdir -p target/lipo-ios-sim/release-smaller || exit 1
