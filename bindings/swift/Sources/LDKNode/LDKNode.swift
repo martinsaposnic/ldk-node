@@ -1376,7 +1376,7 @@ public func FfiConverterTypeFeeRate_lower(_ value: FeeRate) -> UnsafeMutableRawP
 
 public protocol Lsps1LiquidityProtocol : AnyObject {
     
-    func checkOrderStatus(orderId: OrderId) throws  -> Lsps1OrderStatus
+    func checkOrderStatus(orderId: LSPS1OrderId) throws  -> Lsps1OrderStatus
     
     func requestChannel(lspBalanceSat: UInt64, clientBalanceSat: UInt64, channelExpiryBlocks: UInt32, announceChannel: Bool) throws  -> Lsps1OrderStatus
     
@@ -1423,10 +1423,10 @@ open class Lsps1Liquidity:
     
 
     
-open func checkOrderStatus(orderId: OrderId)throws  -> Lsps1OrderStatus {
+open func checkOrderStatus(orderId: LSPS1OrderId)throws  -> Lsps1OrderStatus {
     return try  FfiConverterTypeLSPS1OrderStatus.lift(try rustCallWithError(FfiConverterTypeNodeError.lift) {
     uniffi_ldk_node_fn_method_lsps1liquidity_check_order_status(self.uniffiClonePointer(),
-        FfiConverterTypeOrderId.lower(orderId),$0
+        FfiConverterTypeLSPS1OrderId.lower(orderId),$0
     )
 })
 }
@@ -3989,15 +3989,193 @@ public func FfiConverterTypeLSPFeeLimits_lower(_ value: LspFeeLimits) -> RustBuf
 }
 
 
+public struct Lsps1Bolt11PaymentInfo {
+    public var state: Lsps1PaymentState
+    public var expiresAt: DateTime
+    public var feeTotalSat: UInt64
+    public var orderTotalSat: UInt64
+    public var invoice: Bolt11Invoice
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(state: Lsps1PaymentState, expiresAt: DateTime, feeTotalSat: UInt64, orderTotalSat: UInt64, invoice: Bolt11Invoice) {
+        self.state = state
+        self.expiresAt = expiresAt
+        self.feeTotalSat = feeTotalSat
+        self.orderTotalSat = orderTotalSat
+        self.invoice = invoice
+    }
+}
+
+
+
+extension Lsps1Bolt11PaymentInfo: Equatable, Hashable {
+    public static func ==(lhs: Lsps1Bolt11PaymentInfo, rhs: Lsps1Bolt11PaymentInfo) -> Bool {
+        if lhs.state != rhs.state {
+            return false
+        }
+        if lhs.expiresAt != rhs.expiresAt {
+            return false
+        }
+        if lhs.feeTotalSat != rhs.feeTotalSat {
+            return false
+        }
+        if lhs.orderTotalSat != rhs.orderTotalSat {
+            return false
+        }
+        if lhs.invoice != rhs.invoice {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(state)
+        hasher.combine(expiresAt)
+        hasher.combine(feeTotalSat)
+        hasher.combine(orderTotalSat)
+        hasher.combine(invoice)
+    }
+}
+
+
+public struct FfiConverterTypeLSPS1Bolt11PaymentInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Lsps1Bolt11PaymentInfo {
+        return
+            try Lsps1Bolt11PaymentInfo(
+                state: FfiConverterTypeLSPS1PaymentState.read(from: &buf), 
+                expiresAt: FfiConverterTypeDateTime.read(from: &buf), 
+                feeTotalSat: FfiConverterUInt64.read(from: &buf), 
+                orderTotalSat: FfiConverterUInt64.read(from: &buf), 
+                invoice: FfiConverterTypeBolt11Invoice.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Lsps1Bolt11PaymentInfo, into buf: inout [UInt8]) {
+        FfiConverterTypeLSPS1PaymentState.write(value.state, into: &buf)
+        FfiConverterTypeDateTime.write(value.expiresAt, into: &buf)
+        FfiConverterUInt64.write(value.feeTotalSat, into: &buf)
+        FfiConverterUInt64.write(value.orderTotalSat, into: &buf)
+        FfiConverterTypeBolt11Invoice.write(value.invoice, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypeLSPS1Bolt11PaymentInfo_lift(_ buf: RustBuffer) throws -> Lsps1Bolt11PaymentInfo {
+    return try FfiConverterTypeLSPS1Bolt11PaymentInfo.lift(buf)
+}
+
+public func FfiConverterTypeLSPS1Bolt11PaymentInfo_lower(_ value: Lsps1Bolt11PaymentInfo) -> RustBuffer {
+    return FfiConverterTypeLSPS1Bolt11PaymentInfo.lower(value)
+}
+
+
+public struct Lsps1OrderParams {
+    public var lspBalanceSat: UInt64
+    public var clientBalanceSat: UInt64
+    public var requiredChannelConfirmations: UInt16
+    public var fundingConfirmsWithinBlocks: UInt16
+    public var channelExpiryBlocks: UInt32
+    public var token: String?
+    public var announceChannel: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(lspBalanceSat: UInt64, clientBalanceSat: UInt64, requiredChannelConfirmations: UInt16, fundingConfirmsWithinBlocks: UInt16, channelExpiryBlocks: UInt32, token: String?, announceChannel: Bool) {
+        self.lspBalanceSat = lspBalanceSat
+        self.clientBalanceSat = clientBalanceSat
+        self.requiredChannelConfirmations = requiredChannelConfirmations
+        self.fundingConfirmsWithinBlocks = fundingConfirmsWithinBlocks
+        self.channelExpiryBlocks = channelExpiryBlocks
+        self.token = token
+        self.announceChannel = announceChannel
+    }
+}
+
+
+
+extension Lsps1OrderParams: Equatable, Hashable {
+    public static func ==(lhs: Lsps1OrderParams, rhs: Lsps1OrderParams) -> Bool {
+        if lhs.lspBalanceSat != rhs.lspBalanceSat {
+            return false
+        }
+        if lhs.clientBalanceSat != rhs.clientBalanceSat {
+            return false
+        }
+        if lhs.requiredChannelConfirmations != rhs.requiredChannelConfirmations {
+            return false
+        }
+        if lhs.fundingConfirmsWithinBlocks != rhs.fundingConfirmsWithinBlocks {
+            return false
+        }
+        if lhs.channelExpiryBlocks != rhs.channelExpiryBlocks {
+            return false
+        }
+        if lhs.token != rhs.token {
+            return false
+        }
+        if lhs.announceChannel != rhs.announceChannel {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(lspBalanceSat)
+        hasher.combine(clientBalanceSat)
+        hasher.combine(requiredChannelConfirmations)
+        hasher.combine(fundingConfirmsWithinBlocks)
+        hasher.combine(channelExpiryBlocks)
+        hasher.combine(token)
+        hasher.combine(announceChannel)
+    }
+}
+
+
+public struct FfiConverterTypeLSPS1OrderParams: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Lsps1OrderParams {
+        return
+            try Lsps1OrderParams(
+                lspBalanceSat: FfiConverterUInt64.read(from: &buf), 
+                clientBalanceSat: FfiConverterUInt64.read(from: &buf), 
+                requiredChannelConfirmations: FfiConverterUInt16.read(from: &buf), 
+                fundingConfirmsWithinBlocks: FfiConverterUInt16.read(from: &buf), 
+                channelExpiryBlocks: FfiConverterUInt32.read(from: &buf), 
+                token: FfiConverterOptionString.read(from: &buf), 
+                announceChannel: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Lsps1OrderParams, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.lspBalanceSat, into: &buf)
+        FfiConverterUInt64.write(value.clientBalanceSat, into: &buf)
+        FfiConverterUInt16.write(value.requiredChannelConfirmations, into: &buf)
+        FfiConverterUInt16.write(value.fundingConfirmsWithinBlocks, into: &buf)
+        FfiConverterUInt32.write(value.channelExpiryBlocks, into: &buf)
+        FfiConverterOptionString.write(value.token, into: &buf)
+        FfiConverterBool.write(value.announceChannel, into: &buf)
+    }
+}
+
+
+public func FfiConverterTypeLSPS1OrderParams_lift(_ buf: RustBuffer) throws -> Lsps1OrderParams {
+    return try FfiConverterTypeLSPS1OrderParams.lift(buf)
+}
+
+public func FfiConverterTypeLSPS1OrderParams_lower(_ value: Lsps1OrderParams) -> RustBuffer {
+    return FfiConverterTypeLSPS1OrderParams.lower(value)
+}
+
+
 public struct Lsps1OrderStatus {
-    public var orderId: OrderId
-    public var orderParams: OrderParameters
+    public var orderId: LSPS1OrderId
+    public var orderParams: Lsps1OrderParams
     public var paymentOptions: PaymentInfo
     public var channelState: ChannelOrderInfo?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(orderId: OrderId, orderParams: OrderParameters, paymentOptions: PaymentInfo, channelState: ChannelOrderInfo?) {
+    public init(orderId: LSPS1OrderId, orderParams: Lsps1OrderParams, paymentOptions: PaymentInfo, channelState: ChannelOrderInfo?) {
         self.orderId = orderId
         self.orderParams = orderParams
         self.paymentOptions = paymentOptions
@@ -4011,16 +4189,16 @@ public struct FfiConverterTypeLSPS1OrderStatus: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Lsps1OrderStatus {
         return
             try Lsps1OrderStatus(
-                orderId: FfiConverterTypeOrderId.read(from: &buf), 
-                orderParams: FfiConverterTypeOrderParameters.read(from: &buf), 
+                orderId: FfiConverterTypeLSPS1OrderId.read(from: &buf), 
+                orderParams: FfiConverterTypeLSPS1OrderParams.read(from: &buf), 
                 paymentOptions: FfiConverterTypePaymentInfo.read(from: &buf), 
                 channelState: FfiConverterOptionTypeChannelOrderInfo.read(from: &buf)
         )
     }
 
     public static func write(_ value: Lsps1OrderStatus, into buf: inout [UInt8]) {
-        FfiConverterTypeOrderId.write(value.orderId, into: &buf)
-        FfiConverterTypeOrderParameters.write(value.orderParams, into: &buf)
+        FfiConverterTypeLSPS1OrderId.write(value.orderId, into: &buf)
+        FfiConverterTypeLSPS1OrderParams.write(value.orderParams, into: &buf)
         FfiConverterTypePaymentInfo.write(value.paymentOptions, into: &buf)
         FfiConverterOptionTypeChannelOrderInfo.write(value.channelState, into: &buf)
     }
@@ -4458,7 +4636,7 @@ public func FfiConverterTypeNodeStatus_lower(_ value: NodeStatus) -> RustBuffer 
 
 
 public struct OnchainPaymentInfo {
-    public var state: PaymentState
+    public var state: Lsps1PaymentState
     public var expiresAt: DateTime
     public var feeTotalSat: UInt64
     public var orderTotalSat: UInt64
@@ -4469,7 +4647,7 @@ public struct OnchainPaymentInfo {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(state: PaymentState, expiresAt: DateTime, feeTotalSat: UInt64, orderTotalSat: UInt64, address: Address, minOnchainPaymentConfirmations: UInt16?, minFeeFor0conf: FeeRate, refundOnchainAddress: Address?) {
+    public init(state: Lsps1PaymentState, expiresAt: DateTime, feeTotalSat: UInt64, orderTotalSat: UInt64, address: Address, minOnchainPaymentConfirmations: UInt16?, minFeeFor0conf: FeeRate, refundOnchainAddress: Address?) {
         self.state = state
         self.expiresAt = expiresAt
         self.feeTotalSat = feeTotalSat
@@ -4487,7 +4665,7 @@ public struct FfiConverterTypeOnchainPaymentInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OnchainPaymentInfo {
         return
             try OnchainPaymentInfo(
-                state: FfiConverterTypePaymentState.read(from: &buf), 
+                state: FfiConverterTypeLSPS1PaymentState.read(from: &buf), 
                 expiresAt: FfiConverterTypeDateTime.read(from: &buf), 
                 feeTotalSat: FfiConverterUInt64.read(from: &buf), 
                 orderTotalSat: FfiConverterUInt64.read(from: &buf), 
@@ -4499,7 +4677,7 @@ public struct FfiConverterTypeOnchainPaymentInfo: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: OnchainPaymentInfo, into buf: inout [UInt8]) {
-        FfiConverterTypePaymentState.write(value.state, into: &buf)
+        FfiConverterTypeLSPS1PaymentState.write(value.state, into: &buf)
         FfiConverterTypeDateTime.write(value.expiresAt, into: &buf)
         FfiConverterUInt64.write(value.feeTotalSat, into: &buf)
         FfiConverterUInt64.write(value.orderTotalSat, into: &buf)
@@ -4517,103 +4695,6 @@ public func FfiConverterTypeOnchainPaymentInfo_lift(_ buf: RustBuffer) throws ->
 
 public func FfiConverterTypeOnchainPaymentInfo_lower(_ value: OnchainPaymentInfo) -> RustBuffer {
     return FfiConverterTypeOnchainPaymentInfo.lower(value)
-}
-
-
-public struct OrderParameters {
-    public var lspBalanceSat: UInt64
-    public var clientBalanceSat: UInt64
-    public var requiredChannelConfirmations: UInt16
-    public var fundingConfirmsWithinBlocks: UInt16
-    public var channelExpiryBlocks: UInt32
-    public var token: String?
-    public var announceChannel: Bool
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(lspBalanceSat: UInt64, clientBalanceSat: UInt64, requiredChannelConfirmations: UInt16, fundingConfirmsWithinBlocks: UInt16, channelExpiryBlocks: UInt32, token: String?, announceChannel: Bool) {
-        self.lspBalanceSat = lspBalanceSat
-        self.clientBalanceSat = clientBalanceSat
-        self.requiredChannelConfirmations = requiredChannelConfirmations
-        self.fundingConfirmsWithinBlocks = fundingConfirmsWithinBlocks
-        self.channelExpiryBlocks = channelExpiryBlocks
-        self.token = token
-        self.announceChannel = announceChannel
-    }
-}
-
-
-
-extension OrderParameters: Equatable, Hashable {
-    public static func ==(lhs: OrderParameters, rhs: OrderParameters) -> Bool {
-        if lhs.lspBalanceSat != rhs.lspBalanceSat {
-            return false
-        }
-        if lhs.clientBalanceSat != rhs.clientBalanceSat {
-            return false
-        }
-        if lhs.requiredChannelConfirmations != rhs.requiredChannelConfirmations {
-            return false
-        }
-        if lhs.fundingConfirmsWithinBlocks != rhs.fundingConfirmsWithinBlocks {
-            return false
-        }
-        if lhs.channelExpiryBlocks != rhs.channelExpiryBlocks {
-            return false
-        }
-        if lhs.token != rhs.token {
-            return false
-        }
-        if lhs.announceChannel != rhs.announceChannel {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(lspBalanceSat)
-        hasher.combine(clientBalanceSat)
-        hasher.combine(requiredChannelConfirmations)
-        hasher.combine(fundingConfirmsWithinBlocks)
-        hasher.combine(channelExpiryBlocks)
-        hasher.combine(token)
-        hasher.combine(announceChannel)
-    }
-}
-
-
-public struct FfiConverterTypeOrderParameters: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OrderParameters {
-        return
-            try OrderParameters(
-                lspBalanceSat: FfiConverterUInt64.read(from: &buf), 
-                clientBalanceSat: FfiConverterUInt64.read(from: &buf), 
-                requiredChannelConfirmations: FfiConverterUInt16.read(from: &buf), 
-                fundingConfirmsWithinBlocks: FfiConverterUInt16.read(from: &buf), 
-                channelExpiryBlocks: FfiConverterUInt32.read(from: &buf), 
-                token: FfiConverterOptionString.read(from: &buf), 
-                announceChannel: FfiConverterBool.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: OrderParameters, into buf: inout [UInt8]) {
-        FfiConverterUInt64.write(value.lspBalanceSat, into: &buf)
-        FfiConverterUInt64.write(value.clientBalanceSat, into: &buf)
-        FfiConverterUInt16.write(value.requiredChannelConfirmations, into: &buf)
-        FfiConverterUInt16.write(value.fundingConfirmsWithinBlocks, into: &buf)
-        FfiConverterUInt32.write(value.channelExpiryBlocks, into: &buf)
-        FfiConverterOptionString.write(value.token, into: &buf)
-        FfiConverterBool.write(value.announceChannel, into: &buf)
-    }
-}
-
-
-public func FfiConverterTypeOrderParameters_lift(_ buf: RustBuffer) throws -> OrderParameters {
-    return try FfiConverterTypeOrderParameters.lift(buf)
-}
-
-public func FfiConverterTypeOrderParameters_lower(_ value: OrderParameters) -> RustBuffer {
-    return FfiConverterTypeOrderParameters.lower(value)
 }
 
 
@@ -4772,12 +4853,12 @@ public func FfiConverterTypePaymentDetails_lower(_ value: PaymentDetails) -> Rus
 
 
 public struct PaymentInfo {
-    public var bolt11: Bolt11PaymentInfo?
+    public var bolt11: Lsps1Bolt11PaymentInfo?
     public var onchain: OnchainPaymentInfo?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(bolt11: Bolt11PaymentInfo?, onchain: OnchainPaymentInfo?) {
+    public init(bolt11: Lsps1Bolt11PaymentInfo?, onchain: OnchainPaymentInfo?) {
         self.bolt11 = bolt11
         self.onchain = onchain
     }
@@ -4789,13 +4870,13 @@ public struct FfiConverterTypePaymentInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PaymentInfo {
         return
             try PaymentInfo(
-                bolt11: FfiConverterOptionTypeBolt11PaymentInfo.read(from: &buf), 
+                bolt11: FfiConverterOptionTypeLSPS1Bolt11PaymentInfo.read(from: &buf), 
                 onchain: FfiConverterOptionTypeOnchainPaymentInfo.read(from: &buf)
         )
     }
 
     public static func write(_ value: PaymentInfo, into buf: inout [UInt8]) {
-        FfiConverterOptionTypeBolt11PaymentInfo.write(value.bolt11, into: &buf)
+        FfiConverterOptionTypeLSPS1Bolt11PaymentInfo.write(value.bolt11, into: &buf)
         FfiConverterOptionTypeOnchainPaymentInfo.write(value.onchain, into: &buf)
     }
 }
@@ -5654,6 +5735,68 @@ public func FfiConverterTypeEvent_lower(_ value: Event) -> RustBuffer {
 
 
 extension Event: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
+public enum Lsps1PaymentState {
+    
+    case expectPayment
+    case paid
+    case refunded
+}
+
+
+public struct FfiConverterTypeLSPS1PaymentState: FfiConverterRustBuffer {
+    typealias SwiftType = Lsps1PaymentState
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Lsps1PaymentState {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .expectPayment
+        
+        case 2: return .paid
+        
+        case 3: return .refunded
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: Lsps1PaymentState, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .expectPayment:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .paid:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .refunded:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+public func FfiConverterTypeLSPS1PaymentState_lift(_ buf: RustBuffer) throws -> Lsps1PaymentState {
+    return try FfiConverterTypeLSPS1PaymentState.lift(buf)
+}
+
+public func FfiConverterTypeLSPS1PaymentState_lower(_ value: Lsps1PaymentState) -> RustBuffer {
+    return FfiConverterTypeLSPS1PaymentState.lower(value)
+}
+
+
+
+extension Lsps1PaymentState: Equatable, Hashable {}
 
 
 
@@ -7331,27 +7474,6 @@ fileprivate struct FfiConverterOptionTypeBackgroundSyncConfig: FfiConverterRustB
     }
 }
 
-fileprivate struct FfiConverterOptionTypeBolt11PaymentInfo: FfiConverterRustBuffer {
-    typealias SwiftType = Bolt11PaymentInfo?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeBolt11PaymentInfo.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeBolt11PaymentInfo.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
 fileprivate struct FfiConverterOptionTypeChannelConfig: FfiConverterRustBuffer {
     typealias SwiftType = ChannelConfig?
 
@@ -7473,6 +7595,27 @@ fileprivate struct FfiConverterOptionTypeEsploraSyncConfig: FfiConverterRustBuff
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeEsploraSyncConfig.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+fileprivate struct FfiConverterOptionTypeLSPS1Bolt11PaymentInfo: FfiConverterRustBuffer {
+    typealias SwiftType = Lsps1Bolt11PaymentInfo?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLSPS1Bolt11PaymentInfo.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLSPS1Bolt11PaymentInfo.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -8414,6 +8557,40 @@ public func FfiConverterTypeDateTime_lower(_ value: DateTime) -> RustBuffer {
  * Typealias from the type name used in the UDL file to the builtin type.  This
  * is needed because the UDL type name is used in function/method signatures.
  */
+public typealias LSPS1OrderId = String
+public struct FfiConverterTypeLSPS1OrderId: FfiConverter {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LSPS1OrderId {
+        return try FfiConverterString.read(from: &buf)
+    }
+
+    public static func write(_ value: LSPS1OrderId, into buf: inout [UInt8]) {
+        return FfiConverterString.write(value, into: &buf)
+    }
+
+    public static func lift(_ value: RustBuffer) throws -> LSPS1OrderId {
+        return try FfiConverterString.lift(value)
+    }
+
+    public static func lower(_ value: LSPS1OrderId) -> RustBuffer {
+        return FfiConverterString.lower(value)
+    }
+}
+
+
+public func FfiConverterTypeLSPS1OrderId_lift(_ value: RustBuffer) throws -> LSPS1OrderId {
+    return try FfiConverterTypeLSPS1OrderId.lift(value)
+}
+
+public func FfiConverterTypeLSPS1OrderId_lower(_ value: LSPS1OrderId) -> RustBuffer {
+    return FfiConverterTypeLSPS1OrderId.lower(value)
+}
+
+
+
+/**
+ * Typealias from the type name used in the UDL file to the builtin type.  This
+ * is needed because the UDL type name is used in function/method signatures.
+ */
 public typealias Mnemonic = String
 public struct FfiConverterTypeMnemonic: FfiConverter {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Mnemonic {
@@ -9164,7 +9341,7 @@ private var initializationResult: InitializationResult {
     if (uniffi_ldk_node_checksum_method_feerate_to_sat_per_vb_floor() != 59617) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_ldk_node_checksum_method_lsps1liquidity_check_order_status() != 64731) {
+    if (uniffi_ldk_node_checksum_method_lsps1liquidity_check_order_status() != 57147) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ldk_node_checksum_method_lsps1liquidity_request_channel() != 18153) {

@@ -13,7 +13,7 @@ use crate::logger::{log_debug, log_error, log_info, LdkLogger, Logger};
 use crate::types::{ChannelManager, KeysManager, LiquidityManager, PeerManager, Wallet};
 use crate::{total_anchor_channels_reserve_sats, Config, Error};
 
-use lightning::events::HTLCDestination;
+use lightning::events::HTLCHandlingFailureType;
 use lightning::ln::channelmanager::{InterceptId, MIN_FINAL_CLTV_EXPIRY_DELTA};
 use lightning::ln::msgs::{LightningError, SocketAddress};
 use lightning::ln::types::ChannelId;
@@ -98,7 +98,7 @@ struct LSPS2Client {
 struct LSPS5Client {
 	ldk_client_config: LdkLSPS5ClientConfig,
 	lsp_node_id: PublicKey,
-	lsp_address: SocketAddress,
+	_lsp_address: SocketAddress,
 	pending_set_webhook_requests: Mutex<HashMap<LSPSRequestId, oneshot::Sender<SetWebhookRequest>>>,
 	pending_list_webhooks_requests:
 		Mutex<HashMap<LSPSRequestId, oneshot::Sender<ListWebhooksRequest>>>,
@@ -267,7 +267,7 @@ where
 		self.lsps5_client = Some(LSPS5Client {
 			ldk_client_config,
 			lsp_node_id,
-			lsp_address,
+			_lsp_address: lsp_address,
 			pending_set_webhook_requests,
 			pending_list_webhooks_requests,
 			pending_remove_webhook_requests,
@@ -324,7 +324,6 @@ where
 			None,
 			liquidity_service_config,
 			liquidity_client_config,
-			None,
 		));
 
 		LiquiditySource {
@@ -392,7 +391,7 @@ where
 		if let Some(lsps5_client_handler) = self.liquidity_manager().lsps5_client_handler() {
 			println!("lsps5_client {:?}", &self.lsps5_client.is_some());
 			if let Some(lsps5_client) = &self.lsps5_client {
-				lsps5_client_handler.list_webhooks(lsps5_client.lsp_node_id)
+				Ok(lsps5_client_handler.list_webhooks(lsps5_client.lsp_node_id))
 			} else {
 				log_error!(
 					self.logger,
@@ -427,7 +426,22 @@ where
 			println!("lsps5_client {:?}", &self.lsps5_client.is_some());
 			if let Some(lsps5_client) = &self.lsps5_client {
 				println!("Setting webhook for app {} to {}", app_name, webhook_url);
-				lsps5_client_handler.set_webhook(lsps5_client.lsp_node_id, app_name, webhook_url)
+				let result = lsps5_client_handler.set_webhook(
+					lsps5_client.lsp_node_id,
+					app_name,
+					webhook_url,
+				);
+				println!("Result: {:?}", result);
+				if let Err(e) = result {
+					log_error!(self.logger, "Failed to set webhook: {:?}", e);
+					return Err(LightningError {
+						err: format!("Failed to set webhook: {:?}", e),
+						action: lightning::ln::msgs::ErrorAction::IgnoreError,
+					});
+				} else {
+					println!("Webhook set successfully");
+					return Ok(result.unwrap());
+				}
 			} else {
 				log_error!(
 					self.logger,
@@ -1408,7 +1422,7 @@ where
 						);
 				}
 			},
-			LiquidityEvent::LSPS5Service(LSPS5ServiceEvent::SendWebhookNotifications {
+			LiquidityEvent::LSPS5Service(LSPS5ServiceEvent::SendWebhookNotification {
 				counterparty_node_id,
 				app_name,
 				url,
@@ -1925,9 +1939,9 @@ where
 		}
 	}
 
-	pub(crate) fn handle_htlc_handling_failed(&self, failed_next_destination: HTLCDestination) {
+	pub(crate) fn handle_htlc_handling_failed(&self, failure_type: HTLCHandlingFailureType) {
 		if let Some(lsps2_service_handler) = self.liquidity_manager.lsps2_service_handler() {
-			if let Err(e) = lsps2_service_handler.htlc_handling_failed(failed_next_destination) {
+			if let Err(e) = lsps2_service_handler.htlc_handling_failed(failure_type) {
 				log_error!(
 					self.logger,
 					"LSPS2 service failed to handle HTLCHandlingFailed event: {:?}",
@@ -1956,14 +1970,7 @@ where
 			println!("Next node ID: {:?}", next_node_id);
 			if let Some(lsps5_service_handler) = self.liquidity_manager.lsps5_service_handler() {
 				println!("LSPS5 service handler found");
-				if let Err(e) = lsps5_service_handler.notify_payment_incoming(next_node_id) {
-					println!("Failed to notify LSPS5 service: {:?}", e);
-					log_error!(
-						self.logger,
-						"LSPS5 service failed to handle PaymentForwarded: {:?}",
-						e
-					);
-				}
+				lsps5_service_handler.notify_payment_incoming(next_node_id);
 			}
 		}
 	}

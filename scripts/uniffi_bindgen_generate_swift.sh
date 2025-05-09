@@ -4,7 +4,7 @@ set -eox pipefail
 BINDINGS_DIR="./bindings/swift"
 UNIFFI_BINDGEN_BIN="cargo run --manifest-path bindings/uniffi-bindgen/Cargo.toml"
 
-cargo build --release || exit 1
+# Generate Swift bindings
 $UNIFFI_BINDGEN_BIN generate bindings/ldk_node.udl --language swift -o "$BINDINGS_DIR" || exit 1
 
 mkdir -p $BINDINGS_DIR
@@ -15,6 +15,23 @@ rustup component add rust-src --toolchain stable
 rustup target add aarch64-apple-ios x86_64-apple-ios --toolchain stable
 rustup target add aarch64-apple-ios-sim --toolchain stable
 rustup target add aarch64-apple-darwin x86_64-apple-darwin --toolchain stable
+
+# Set iOS/iOS-sim specific env vars
+export SDKROOT_IOS_SIM="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+export SDKROOT_MACOS="$(xcrun --sdk macosx --show-sdk-path)"
+export BINDGEN_EXTRA_CLANG_ARGS="--sysroot=$SDKROOT_IOS_SIM -isysroot $SDKROOT_IOS_SIM"
+export CC_aarch64_apple_ios="$(xcrun --sdk iphoneos --find clang)"
+export AR_aarch64_apple_ios="$(xcrun --sdk iphoneos --find ar)"
+export CARGO_TARGET_AARCH64_APPLE_IOS_LINKER="$(xcrun --sdk iphoneos --find clang)"
+export CC_x86_64_apple_ios="$(xcrun --sdk iphonesimulator --find clang)"
+export AR_x86_64_apple_ios="$(xcrun --sdk iphonesimulator --find ar)"
+export CARGO_TARGET_X86_64_APPLE_IOS_LINKER="$(xcrun --sdk iphonesimulator --find clang)"
+export CC_aarch64_apple_ios_sim="$(xcrun --sdk iphonesimulator --find clang)"
+export AR_aarch64_apple_ios_sim="$(xcrun --sdk iphonesimulator --find ar)"
+export CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER="$(xcrun --sdk iphonesimulator --find clang)"
+export CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUSTFLAGS="--cfg=bindgen_cannot_handle_sim"
+export IPHONEOS_DEPLOYMENT_TARGET=13.0
+export AWS_LC_SYS_EXTERNAL_BINDGEN=1
 
 # Build rust target libs
 cargo build --profile release-smaller --features uniffi || exit 1
@@ -31,6 +48,9 @@ mkdir -p target/lipo-macos/release-smaller || exit 1
 lipo target/aarch64-apple-darwin/release-smaller/libldk_node.a target/x86_64-apple-darwin/release-smaller/libldk_node.a -create -output target/lipo-macos/release-smaller/libldk_node.a || exit 1
 
 $UNIFFI_BINDGEN_BIN generate bindings/ldk_node.udl --language swift -o "$BINDINGS_DIR" || exit 1
+
+# Use the correct SDKROOT for macOS Swift compilation
+export SDKROOT="$SDKROOT_MACOS"
 
 swiftc -module-name LDKNode -emit-library -o "$BINDINGS_DIR"/libldk_node.dylib -emit-module -emit-module-path "$BINDINGS_DIR" -parse-as-library -L ./target/release-smaller -lldk_node -Xcc -fmodule-map-file="$BINDINGS_DIR"/LDKNodeFFI.modulemap "$BINDINGS_DIR"/LDKNode.swift -v || exit 1
 
