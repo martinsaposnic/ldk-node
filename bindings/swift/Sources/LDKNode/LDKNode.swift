@@ -8,11 +8,9 @@ import Foundation
 // Depending on the consumer's build setup, the low-level FFI code
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
-// #if canImport(LDKNodeFFI)
-// import LDKNodeFFI
-// #endif
-
+#if canImport(LDKNodeFFI)
 import LDKNodeFFI
+#endif
 
 fileprivate extension RustBuffer {
     // Allocate a new buffer, copying the contents of a `UInt8` array.
@@ -2979,87 +2977,6 @@ public func FfiConverterTypeBestBlock_lift(_ buf: RustBuffer) throws -> BestBloc
 
 public func FfiConverterTypeBestBlock_lower(_ value: BestBlock) -> RustBuffer {
     return FfiConverterTypeBestBlock.lower(value)
-}
-
-
-public struct Bolt11PaymentInfo {
-    public var state: PaymentState
-    public var expiresAt: DateTime
-    public var feeTotalSat: UInt64
-    public var orderTotalSat: UInt64
-    public var invoice: Bolt11Invoice
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(state: PaymentState, expiresAt: DateTime, feeTotalSat: UInt64, orderTotalSat: UInt64, invoice: Bolt11Invoice) {
-        self.state = state
-        self.expiresAt = expiresAt
-        self.feeTotalSat = feeTotalSat
-        self.orderTotalSat = orderTotalSat
-        self.invoice = invoice
-    }
-}
-
-
-
-extension Bolt11PaymentInfo: Equatable, Hashable {
-    public static func ==(lhs: Bolt11PaymentInfo, rhs: Bolt11PaymentInfo) -> Bool {
-        if lhs.state != rhs.state {
-            return false
-        }
-        if lhs.expiresAt != rhs.expiresAt {
-            return false
-        }
-        if lhs.feeTotalSat != rhs.feeTotalSat {
-            return false
-        }
-        if lhs.orderTotalSat != rhs.orderTotalSat {
-            return false
-        }
-        if lhs.invoice != rhs.invoice {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(state)
-        hasher.combine(expiresAt)
-        hasher.combine(feeTotalSat)
-        hasher.combine(orderTotalSat)
-        hasher.combine(invoice)
-    }
-}
-
-
-public struct FfiConverterTypeBolt11PaymentInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Bolt11PaymentInfo {
-        return
-            try Bolt11PaymentInfo(
-                state: FfiConverterTypePaymentState.read(from: &buf), 
-                expiresAt: FfiConverterTypeDateTime.read(from: &buf), 
-                feeTotalSat: FfiConverterUInt64.read(from: &buf), 
-                orderTotalSat: FfiConverterUInt64.read(from: &buf), 
-                invoice: FfiConverterTypeBolt11Invoice.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: Bolt11PaymentInfo, into buf: inout [UInt8]) {
-        FfiConverterTypePaymentState.write(value.state, into: &buf)
-        FfiConverterTypeDateTime.write(value.expiresAt, into: &buf)
-        FfiConverterUInt64.write(value.feeTotalSat, into: &buf)
-        FfiConverterUInt64.write(value.orderTotalSat, into: &buf)
-        FfiConverterTypeBolt11Invoice.write(value.invoice, into: &buf)
-    }
-}
-
-
-public func FfiConverterTypeBolt11PaymentInfo_lift(_ buf: RustBuffer) throws -> Bolt11PaymentInfo {
-    return try FfiConverterTypeBolt11PaymentInfo.lift(buf)
-}
-
-public func FfiConverterTypeBolt11PaymentInfo_lower(_ value: Bolt11PaymentInfo) -> RustBuffer {
-    return FfiConverterTypeBolt11PaymentInfo.lower(value)
 }
 
 
@@ -6954,68 +6871,6 @@ extension PaymentKind: Equatable, Hashable {}
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
-public enum PaymentState {
-    
-    case expectPayment
-    case paid
-    case refunded
-}
-
-
-public struct FfiConverterTypePaymentState: FfiConverterRustBuffer {
-    typealias SwiftType = PaymentState
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PaymentState {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .expectPayment
-        
-        case 2: return .paid
-        
-        case 3: return .refunded
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: PaymentState, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .expectPayment:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .paid:
-            writeInt(&buf, Int32(2))
-        
-        
-        case .refunded:
-            writeInt(&buf, Int32(3))
-        
-        }
-    }
-}
-
-
-public func FfiConverterTypePaymentState_lift(_ buf: RustBuffer) throws -> PaymentState {
-    return try FfiConverterTypePaymentState.lift(buf)
-}
-
-public func FfiConverterTypePaymentState_lower(_ value: PaymentState) -> RustBuffer {
-    return FfiConverterTypePaymentState.lower(value)
-}
-
-
-
-extension PaymentState: Equatable, Hashable {}
-
-
-
-// Note that we don't yet support `indirect` for enums.
-// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
-
 public enum PaymentStatus {
     
     case pending
@@ -8765,40 +8620,6 @@ public func FfiConverterTypeOfferId_lift(_ value: RustBuffer) throws -> OfferId 
 
 public func FfiConverterTypeOfferId_lower(_ value: OfferId) -> RustBuffer {
     return FfiConverterTypeOfferId.lower(value)
-}
-
-
-
-/**
- * Typealias from the type name used in the UDL file to the builtin type.  This
- * is needed because the UDL type name is used in function/method signatures.
- */
-public typealias OrderId = String
-public struct FfiConverterTypeOrderId: FfiConverter {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OrderId {
-        return try FfiConverterString.read(from: &buf)
-    }
-
-    public static func write(_ value: OrderId, into buf: inout [UInt8]) {
-        return FfiConverterString.write(value, into: &buf)
-    }
-
-    public static func lift(_ value: RustBuffer) throws -> OrderId {
-        return try FfiConverterString.lift(value)
-    }
-
-    public static func lower(_ value: OrderId) -> RustBuffer {
-        return FfiConverterString.lower(value)
-    }
-}
-
-
-public func FfiConverterTypeOrderId_lift(_ value: RustBuffer) throws -> OrderId {
-    return try FfiConverterTypeOrderId.lift(value)
-}
-
-public func FfiConverterTypeOrderId_lower(_ value: OrderId) -> RustBuffer {
-    return FfiConverterTypeOrderId.lower(value)
 }
 
 
