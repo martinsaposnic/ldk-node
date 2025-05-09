@@ -942,6 +942,8 @@ public protocol BuilderProtocol : AnyObject {
     
     func setLiquiditySourceLsps2(nodeId: PublicKey, address: SocketAddress, token: String?) 
     
+    func setLiquiditySourceLsps5(nodeId: PublicKey, address: SocketAddress) 
+    
     func setListeningAddresses(listeningAddresses: [SocketAddress]) throws 
     
     func setLogFacadeLogger() 
@@ -1152,6 +1154,14 @@ open func setLiquiditySourceLsps2(nodeId: PublicKey, address: SocketAddress, tok
         FfiConverterTypePublicKey.lower(nodeId),
         FfiConverterTypeSocketAddress.lower(address),
         FfiConverterOptionString.lower(token),$0
+    )
+}
+}
+    
+open func setLiquiditySourceLsps5(nodeId: PublicKey, address: SocketAddress) {try! rustCall() {
+    uniffi_ldk_node_fn_method_builder_set_liquidity_source_lsps5(self.uniffiClonePointer(),
+        FfiConverterTypePublicKey.lower(nodeId),
+        FfiConverterTypeSocketAddress.lower(address),$0
     )
 }
 }
@@ -9315,6 +9325,9 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ldk_node_checksum_method_builder_set_liquidity_source_lsps2() != 14430) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ldk_node_checksum_method_builder_set_liquidity_source_lsps5() != 49016) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ldk_node_checksum_method_builder_set_listening_addresses() != 14051) {
