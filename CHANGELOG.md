@@ -1,4 +1,4 @@
-# 0.7.0 - Apr. 29, 2025
+# 0.8.0 - Apr. 29, 2025
 Besides numerous API improvements and bugfixes this fifth minor release notably adds support for sourcing chain and fee rate data from an Electrum backend, requesting channels via the [bLIP-51 / LSPS1](https://github.com/lightning/blips/blob/master/blip-0051.md) protocol, as well as experimental support for operating as a [bLIP-52 / LSPS2](https://github.com/lightning/blips/blob/master/blip-0052.md) service.
 
 ## Feature and API updates
