@@ -130,6 +130,12 @@ interface Node {
 	UnifiedQrPayment unified_qr_payment();
 	LSPS1Liquidity lsps1_liquidity();
 	[Throws=NodeError]
+	void lsps5_set_webhook(string app_name, string webhook_url);
+	[Throws=NodeError]
+	void lsps5_list_webhook();
+	[Throws=NodeError]
+	void lsps5_remove_webhook(string app_name);
+	[Throws=NodeError]
 	void connect(PublicKey node_id, SocketAddress address, boolean persist);
 	[Throws=NodeError]
 	void disconnect(PublicKey node_id);

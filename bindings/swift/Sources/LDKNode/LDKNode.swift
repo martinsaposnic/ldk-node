@@ -1821,6 +1821,12 @@ public protocol NodeProtocol : AnyObject {
     
     func lsps1Liquidity()  -> Lsps1Liquidity
     
+    func lsps5ListWebhook() throws 
+    
+    func lsps5RemoveWebhook(appName: String) throws 
+    
+    func lsps5SetWebhook(appName: String, webhookUrl: String) throws 
+    
     func networkGraph()  -> NetworkGraph
     
     func nextEvent()  -> Event?
@@ -2018,6 +2024,27 @@ open func lsps1Liquidity() -> Lsps1Liquidity {
     uniffi_ldk_node_fn_method_node_lsps1_liquidity(self.uniffiClonePointer(),$0
     )
 })
+}
+    
+open func lsps5ListWebhook()throws  {try rustCallWithError(FfiConverterTypeNodeError.lift) {
+    uniffi_ldk_node_fn_method_node_lsps5_list_webhook(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+open func lsps5RemoveWebhook(appName: String)throws  {try rustCallWithError(FfiConverterTypeNodeError.lift) {
+    uniffi_ldk_node_fn_method_node_lsps5_remove_webhook(self.uniffiClonePointer(),
+        FfiConverterString.lower(appName),$0
+    )
+}
+}
+    
+open func lsps5SetWebhook(appName: String, webhookUrl: String)throws  {try rustCallWithError(FfiConverterTypeNodeError.lift) {
+    uniffi_ldk_node_fn_method_node_lsps5_set_webhook(self.uniffiClonePointer(),
+        FfiConverterString.lower(appName),
+        FfiConverterString.lower(webhookUrl),$0
+    )
+}
 }
     
 open func networkGraph() -> NetworkGraph {
@@ -9244,6 +9271,15 @@ private var initializationResult: InitializationResult {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ldk_node_checksum_method_node_lsps1_liquidity() != 38201) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ldk_node_checksum_method_node_lsps5_list_webhook() != 23294) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ldk_node_checksum_method_node_lsps5_remove_webhook() != 36757) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_ldk_node_checksum_method_node_lsps5_set_webhook() != 20047) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_ldk_node_checksum_method_node_network_graph() != 2695) {

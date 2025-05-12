@@ -101,7 +101,6 @@ pub use bitcoin;
 pub use lightning;
 pub use lightning_invoice;
 pub use lightning_liquidity;
-use lightning_liquidity::lsps0::ser::LSPSRequestId;
 pub use lightning_types;
 pub use vss_client;
 
@@ -152,7 +151,7 @@ use lightning::events::bump_transaction::Wallet as LdkWallet;
 use lightning::impl_writeable_tlv_based;
 use lightning::ln::channel_state::ChannelShutdownState;
 use lightning::ln::channelmanager::PaymentId;
-use lightning::ln::msgs::{LightningError, SocketAddress};
+use lightning::ln::msgs::SocketAddress;
 use lightning::routing::gossip::NodeAlias;
 
 use lightning_background_processor::process_events_async;
@@ -1003,24 +1002,42 @@ impl Node {
 	}
 
 	/// lsps5 set webhook
-	pub fn lsps5_set_webhook(
-		&self, app_name: String, webhook_url: String,
-	) -> Result<LSPSRequestId, LightningError> {
+	pub fn lsps5_set_webhook(&self, app_name: String, webhook_url: String) -> Result<(), Error> {
 		if let Some(liquidity_source) = self.liquidity_source.as_ref() {
-			println!("lsps5_set_webhook");
-			liquidity_source.lsps5_set_webhook(app_name, webhook_url)
+			let result = liquidity_source.lsps5_set_webhook(app_name, webhook_url);
+			if let Err(e) = result {
+				log_error!(self.logger, "Failed to set webhook: {:?}", e);
+				return Err(Error::LiquiditySourceUnavailable);
+			}
+			let result = result.unwrap();
+			log_info!(self.logger, "Webhook set: {:?}", result);
+			return Ok(());
 		} else {
-			panic!("Liquidity source not set");
+			return Err(Error::LiquiditySourceUnavailable);
 		}
 	}
 
 	/// lsps5 list webhook
-	pub fn lsps5_list_webhook(&self) -> Result<LSPSRequestId, LightningError> {
+	pub fn lsps5_list_webhook(&self) -> Result<(), Error> {
 		if let Some(liquidity_source) = self.liquidity_source.as_ref() {
-			println!("lsps5_set_webhook");
-			liquidity_source.lsps5_list_webhook()
+			let _ = liquidity_source.lsps5_list_webhook();
+			return Ok(());
 		} else {
-			panic!("Liquidity source not set");
+			return Err(Error::LiquiditySourceUnavailable);
+		}
+	}
+
+	/// lsps5 remove webhook
+	pub fn lsps5_remove_webhook(&self, app_name: String) -> Result<(), Error> {
+		if let Some(liquidity_source) = self.liquidity_source.as_ref() {
+			let result = liquidity_source.lsps5_remove_webhook(app_name);
+			if let Err(e) = result {
+				log_error!(self.logger, "Failed to remove webhook: {:?}", e);
+				return Err(Error::LiquiditySourceUnavailable);
+			}
+			return Ok(());
+		} else {
+			return Err(Error::LiquiditySourceUnavailable);
 		}
 	}
 

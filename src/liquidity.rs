@@ -387,9 +387,8 @@ where
 	// 	self.lsps5_client.as_ref().map(|s| (s.lsp_node_id, s.lsp_address.clone()))
 	// }
 
-	pub fn lsps5_list_webhook(&self) -> Result<LSPSRequestId, LightningError> {
+	pub fn lsps5_list_webhook(&self) -> Result<LSPSRequestId, Error> {
 		if let Some(lsps5_client_handler) = self.liquidity_manager().lsps5_client_handler() {
-			println!("lsps5_client {:?}", &self.lsps5_client.is_some());
 			if let Some(lsps5_client) = &self.lsps5_client {
 				Ok(lsps5_client_handler.list_webhooks(lsps5_client.lsp_node_id))
 			} else {
@@ -397,21 +396,48 @@ where
 					self.logger,
 					"Failed to set webhook as LSPS5 client was not configured."
 				);
-				Err(LightningError {
-					err: "Failed to set webhook as LSPS5 client was not configured.".to_string(),
-					action: lightning::ln::msgs::ErrorAction::IgnoreError,
-				})
+				Err(Error::LiquiditySourceUnavailable)
 			}
 		} else {
 			log_error!(
 				self.logger,
 				"Failed to set webhook as LSPS5 client handler was not configured."
 			);
-			Err(LightningError {
-				err: "Failed to set webhook as LSPS5 client handler was not configured."
-					.to_string(),
-				action: lightning::ln::msgs::ErrorAction::IgnoreError,
-			})
+			Err(Error::LiquiditySourceUnavailable)
+		}
+	}
+
+	pub fn lsps5_remove_webhook(&self, app_name: String) -> Result<LSPSRequestId, Error> {
+		println!(
+			"lsps5_client_handler: {:?}",
+			self.liquidity_manager().lsps5_client_handler().is_some()
+		);
+		if let Some(lsps5_client_handler) = self.liquidity_manager().lsps5_client_handler() {
+			println!("lsps5_client {:?}", &self.lsps5_client.is_some());
+			if let Some(lsps5_client) = &self.lsps5_client {
+				let result =
+					lsps5_client_handler.remove_webhook(lsps5_client.lsp_node_id, app_name);
+				println!("Result: {:?}", result);
+				if let Err(e) = result {
+					log_error!(self.logger, "Failed to set webhook: {:?}", e);
+					return Err(Error::LiquiditySourceUnavailable);
+				} else {
+					println!("Webhook set successfully");
+					return Ok(result.unwrap());
+				}
+			} else {
+				log_error!(
+					self.logger,
+					"Failed to set webhook as LSPS5 client was not configured."
+				);
+				return Err(Error::LiquiditySourceUnavailable);
+			}
+		} else {
+			log_error!(
+				self.logger,
+				"Failed to set webhook as LSPS5 client handler was not configured."
+			);
+			return Err(Error::LiquiditySourceUnavailable);
 		}
 	}
 
