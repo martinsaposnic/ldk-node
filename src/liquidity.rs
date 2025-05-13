@@ -1992,12 +1992,24 @@ where
 			}
 		}
 
-		if let Some(next_node_id) = next_node_id {
-			println!("Next node ID: {:?}", next_node_id);
-			if let Some(lsps5_service_handler) = self.liquidity_manager.lsps5_service_handler() {
-				println!("LSPS5 service handler found");
-				lsps5_service_handler.notify_payment_incoming(next_node_id);
-			}
+		// if let Some(next_node_id) = next_node_id {
+		// 	println!("Next node ID: {:?}", next_node_id);
+		// 	if let Some(lsps5_service_handler) = self.liquidity_manager.lsps5_service_handler() {
+		// 		println!("LSPS5 service handler found");
+		// 		lsps5_service_handler.notify_payment_incoming(next_node_id);
+		// 	}
+		// }
+	}
+
+	pub fn notify_payment_incoming(&self) {
+		// println!("Next node ID: {:?}", next_node_id);
+		if let Some(lsps5_service_handler) = self.liquidity_manager.lsps5_service_handler() {
+			println!("LSPS5 service handler found");
+			lsps5_service_handler.notify_payment_incoming(
+				"03d4ba751deb6653163d06606f25f2c0f638ecc22305c124d21c4d9c48dea8a261"
+					.parse()
+					.unwrap(),
+			);
 		}
 	}
 }

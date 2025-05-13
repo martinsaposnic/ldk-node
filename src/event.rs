@@ -1055,7 +1055,9 @@ where
 
 				let runtime_lock = self.runtime.read().unwrap();
 				debug_assert!(runtime_lock.is_some());
-
+				if let Some(liquidity_source) = self.liquidity_source.as_ref() {
+					liquidity_source.notify_payment_incoming();
+				}
 				if let Some(runtime) = runtime_lock.as_ref() {
 					runtime.spawn(async move {
 						let millis_to_sleep = thread_rng().gen_range(min..min * 5) as u64;
