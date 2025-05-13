@@ -37,7 +37,6 @@ use lightning::ln::channelmanager::PaymentId;
 use lightning::ln::types::ChannelId;
 use lightning::routing::gossip::NodeId;
 use lightning::util::errors::APIError;
-use lightning::util::hash_tables::HashMap;
 use lightning::util::ser::{Readable, ReadableArgs, Writeable, Writer};
 use lightning_types::payment::{PaymentHash, PaymentPreimage};
 
@@ -1061,11 +1060,7 @@ where
 					runtime.spawn(async move {
 						let millis_to_sleep = thread_rng().gen_range(min..min * 5) as u64;
 						tokio::time::sleep(Duration::from_millis(millis_to_sleep)).await;
-						let whatever = forwarding_channel_manager.forward_htlcs.lock().unwrap();
-						println!(
-							"Forwarding channel manager: {:?}",
-							whatever.keys().collect::<Vec<_>>()
-						);
+
 						forwarding_channel_manager.process_pending_htlc_forwards();
 					});
 				}
