@@ -20,12 +20,12 @@ use ldk_node::config::EsploraSyncConfig;
 use ldk_node::liquidity::LSPS2ServiceConfig;
 use ldk_node::payment::{
 	ConfirmationStatus, PaymentDirection, PaymentKind, PaymentStatus, QrPaymentResult,
-	SendingParameters,
 };
 use ldk_node::{Builder, Event, NodeError};
 
 use lightning::ln::channelmanager::PaymentId;
 use lightning::routing::gossip::{NodeAlias, NodeId};
+use lightning::routing::router::RouteParametersConfig;
 use lightning::util::persist::KVStore;
 
 use lightning_invoice::{Bolt11InvoiceDescription, Description};
@@ -200,11 +200,11 @@ fn multi_hop_sending() {
 	// Sleep a bit for gossip to propagate.
 	std::thread::sleep(std::time::Duration::from_secs(1));
 
-	let sending_params = SendingParameters {
-		max_total_routing_fee_msat: Some(Some(75_000).into()),
-		max_total_cltv_expiry_delta: Some(1000),
-		max_path_count: Some(10),
-		max_channel_saturation_power_of_half: Some(2),
+	let route_params = RouteParametersConfig {
+		max_total_routing_fee_msat: Some(75_000),
+		max_total_cltv_expiry_delta: 1000,
+		max_path_count: 10,
+		max_channel_saturation_power_of_half: 2,
 	};
 
 	let invoice_description =
@@ -213,7 +213,7 @@ fn multi_hop_sending() {
 		.bolt11_payment()
 		.receive(2_500_000, &invoice_description.clone().into(), 9217)
 		.unwrap();
-	nodes[0].bolt11_payment().send(&invoice, Some(sending_params)).unwrap();
+	nodes[0].bolt11_payment().send(&invoice, Some(route_params)).unwrap();
 
 	expect_event!(nodes[1], PaymentForwarded);
 
@@ -1239,6 +1239,8 @@ fn unified_qr_send_receive() {
 
 #[test]
 fn lsps2_client_service_integration() {
+	println!("=== TEST STARTING ===");
+	eprintln!("=== TEST STARTING (stderr) ===");
 	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
 
 	let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
@@ -1258,7 +1260,10 @@ fn lsps2_client_service_integration() {
 		min_channel_lifetime: 100,
 		min_channel_opening_fee_msat: 0,
 		max_client_to_self_delay: 1024,
+		client_trusts_lsp: true,
 	};
+
+	println!("Starting service node!");
 
 	let service_config = random_config(true);
 	setup_builder!(service_builder, service_config.node_config);
@@ -1277,6 +1282,7 @@ fn lsps2_client_service_integration() {
 	let client_node = client_builder.build().unwrap();
 	client_node.start().unwrap();
 
+	println!("Starting client node!");
 	let payer_config = random_config(true);
 	setup_builder!(payer_builder, payer_config.node_config);
 	payer_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
@@ -1298,7 +1304,7 @@ fn lsps2_client_service_integration() {
 	service_node.sync_wallets().unwrap();
 	client_node.sync_wallets().unwrap();
 	payer_node.sync_wallets().unwrap();
-
+	println!("Premine complete!");
 	// Open a channel payer -> service that will allow paying the JIT invoice
 	println!("Opening channel payer_node -> service_node!");
 	open_channel(&payer_node, &service_node, 5_000_000, false, &electrsd);
@@ -1322,6 +1328,7 @@ fn lsps2_client_service_integration() {
 	// Have the payer_node pay the invoice, therby triggering channel open service_node -> client_node.
 	println!("Paying JIT invoice!");
 	let payment_id = payer_node.bolt11_payment().send(&jit_invoice, None).unwrap();
+	println!("Payment ID: {:?}", payment_id);
 	expect_channel_pending_event!(service_node, client_node.node_id());
 	expect_channel_ready_event!(service_node, client_node.node_id());
 	expect_channel_pending_event!(client_node, service_node.node_id());
