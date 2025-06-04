@@ -30,14 +30,19 @@ use lightning::util::persist::KVStore;
 
 use lightning_invoice::{Bolt11InvoiceDescription, Description};
 
-use bitcoin::address::NetworkUnchecked;
+use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
+
+use bitcoin::address::NetworkUnchecked;
 use bitcoin::Address;
 use bitcoin::Amount;
+use lightning_types::payment::PaymentHash;
 use log::LevelFilter;
 
 use std::str::FromStr;
 use std::sync::Arc;
+
+use crate::common::expect_payment_claimable_event;
 
 #[test]
 fn channel_full_cycle() {
@@ -1239,8 +1244,6 @@ fn unified_qr_send_receive() {
 
 #[test]
 fn lsps2_client_service_integration() {
-	println!("=== TEST STARTING ===");
-	eprintln!("=== TEST STARTING (stderr) ===");
 	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
 
 	let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
@@ -1260,7 +1263,7 @@ fn lsps2_client_service_integration() {
 		min_channel_lifetime: 100,
 		min_channel_opening_fee_msat: 0,
 		max_client_to_self_delay: 1024,
-		client_trusts_lsp: true,
+		client_trusts_lsp: false,
 	};
 
 	println!("Starting service node!");
@@ -1387,4 +1390,151 @@ fn facade_logging() {
 	for (_, entry) in logger.retrieve_logs().iter().enumerate() {
 		validate_log_entry(entry);
 	}
+}
+
+#[test]
+fn lsps2_client_trusts_lsp() {
+	println!("=== TEST STARTING ===");
+	eprintln!("=== TEST STARTING (stderr) ===");
+	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
+
+	let esplora_url = format!("http://{}", electrsd.esplora_url.as_ref().unwrap());
+
+	let sync_config = EsploraSyncConfig { background_sync_config: None };
+
+	// Setup three nodes: service, client, and payer
+	let channel_opening_fee_ppm = 10_000;
+	let channel_over_provisioning_ppm = 100_000;
+	let lsps2_service_config = LSPS2ServiceConfig {
+		require_token: None,
+		advertise_service: false,
+		channel_opening_fee_ppm,
+		channel_over_provisioning_ppm,
+		max_payment_size_msat: 1_000_000_000,
+		min_payment_size_msat: 0,
+		min_channel_lifetime: 100,
+		min_channel_opening_fee_msat: 0,
+		max_client_to_self_delay: 1024,
+		client_trusts_lsp: true,
+	};
+
+	println!("Starting service node!");
+
+	let service_config = random_config(true);
+	setup_builder!(service_builder, service_config.node_config);
+	service_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
+	service_builder.set_liquidity_provider_lsps2(lsps2_service_config);
+	let service_node = service_builder.build().unwrap();
+	service_node.start().unwrap();
+
+	let service_node_id = service_node.node_id();
+	let service_addr = service_node.listening_addresses().unwrap().first().unwrap().clone();
+
+	let client_config = random_config(true);
+	setup_builder!(client_builder, client_config.node_config);
+	client_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
+	client_builder.set_liquidity_source_lsps2(service_node_id, service_addr, None);
+	let client_node = client_builder.build().unwrap();
+	client_node.start().unwrap();
+
+	println!("Starting client node!");
+	let payer_config = random_config(true);
+	setup_builder!(payer_builder, payer_config.node_config);
+	payer_builder.set_chain_source_esplora(esplora_url.clone(), Some(sync_config));
+	let payer_node = payer_builder.build().unwrap();
+	payer_node.start().unwrap();
+
+	let service_addr = service_node.onchain_payment().new_address().unwrap();
+	let client_addr = client_node.onchain_payment().new_address().unwrap();
+	let payer_addr = payer_node.onchain_payment().new_address().unwrap();
+
+	let premine_amount_sat = 10_000_000;
+
+	premine_and_distribute_funds(
+		&bitcoind.client,
+		&electrsd.client,
+		vec![service_addr, client_addr, payer_addr],
+		Amount::from_sat(premine_amount_sat),
+	);
+	service_node.sync_wallets().unwrap();
+	client_node.sync_wallets().unwrap();
+	payer_node.sync_wallets().unwrap();
+	println!("Premine complete!");
+	// Open a channel payer -> service that will allow paying the JIT invoice
+	println!("Opening channel payer_node -> service_node!");
+	open_channel(&payer_node, &service_node, 5_000_000, false, &electrsd);
+
+	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 6);
+	service_node.sync_wallets().unwrap();
+	payer_node.sync_wallets().unwrap();
+	expect_channel_ready_event!(payer_node, service_node.node_id());
+	expect_channel_ready_event!(service_node, payer_node.node_id());
+
+	let invoice_description =
+		Bolt11InvoiceDescription::Direct(Description::new(String::from("asdf")).unwrap());
+	let jit_amount_msat = 100_000_000;
+
+	println!("Generating JIT invoice!");
+	let (jit_invoice, preimage) = client_node
+		.bolt11_payment()
+		.receive_via_jit_channel_manual_claim(
+			jit_amount_msat,
+			&invoice_description.into(),
+			1024,
+			None,
+		)
+		.unwrap();
+
+	let initial_mempool_size = bitcoind.client.get_raw_mempool().unwrap().0.len();
+	// Have the payer_node pay the invoice, therby triggering channel open service_node -> client_node.
+	println!("Paying JIT invoice!");
+	let payment_id = payer_node.bolt11_payment().send(&jit_invoice, None).unwrap();
+	println!("Payment ID: {:?}", payment_id);
+	expect_channel_pending_event!(service_node, client_node.node_id());
+	expect_channel_ready_event!(service_node, client_node.node_id());
+	expect_channel_pending_event!(client_node, service_node.node_id());
+	expect_channel_ready_event!(client_node, service_node.node_id());
+	println!("Waiting for funding transaction to be broadcast...");
+	let mut funding_tx_found = false;
+	for _ in 0..50 {
+		std::thread::sleep(std::time::Duration::from_millis(100));
+		let current_mempool = bitcoind.client.get_raw_mempool().unwrap();
+		if current_mempool.0.len() > initial_mempool_size {
+			funding_tx_found = true;
+			break;
+		}
+	}
+	assert!(!funding_tx_found, "Funding transaction should NOT be broadcast yet");
+	let service_fee_msat = (jit_amount_msat * channel_opening_fee_ppm as u64) / 1_000_000;
+	let expected_received_amount_msat = jit_amount_msat - service_fee_msat;
+
+	let manual_payment_hash = PaymentHash(Sha256::hash(&preimage.0).to_byte_array());
+	let _ = expect_payment_claimable_event!(
+		client_node,
+		payment_id,
+		manual_payment_hash,
+		expected_received_amount_msat
+	);
+
+	client_node
+		.bolt11_payment()
+		.claim_for_hash(manual_payment_hash, jit_amount_msat, preimage)
+		.unwrap();
+
+	expect_payment_successful_event!(payer_node, Some(payment_id), None);
+
+	let _ = expect_payment_received_event!(client_node, expected_received_amount_msat).unwrap();
+
+	println!("Waiting for funding transaction to be broadcast...");
+	let mut funding_tx_found = false;
+	for _ in 0..500 {
+		std::thread::sleep(std::time::Duration::from_millis(100));
+		let current_mempool = bitcoind.client.get_raw_mempool().unwrap();
+		if current_mempool.0.len() > initial_mempool_size {
+			funding_tx_found = true;
+			break;
+		}
+	}
+
+	assert!(funding_tx_found, "Funding transaction should be broadcast after the client claims it");
 }

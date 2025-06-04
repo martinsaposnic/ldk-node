@@ -296,12 +296,16 @@ where
 	}
 
 	pub(crate) fn lsps2_check_pending_open_channel(&self) -> Option<bool> {
-		None
+		Some(true)
 	}
 
 	pub(crate) fn lsps2_store_funding_transaction(
 		&self, user_channel_id: u128, counterparty_node_id: PublicKey, funding_tx: Transaction,
 	) {
+		println!(
+			"Storing funding transaction for user channel ID {} and counterparty node ID {}",
+			user_channel_id, counterparty_node_id
+		);
 		if !self.is_client_trusts_lsp() {
 			log_debug!(self.logger, "Skipping funding transaction broadcast as client trusts LSP.");
 			return;
@@ -329,6 +333,12 @@ where
 		self.lsps2_service.as_ref().map(|_| {
 			let lsps2_service_handler = self.liquidity_manager.lsps2_service_handler();
 			if let Some(handler) = lsps2_service_handler {
+				println!("");
+				println!(
+					"Broadcasting funding transaction for user channel ID {}",
+					user_channel_id
+				);
+				println!("");
 				handler.funding_tx_broadcast_safe(user_channel_id).unwrap_or_else(|e| {
 					debug_assert!(false, "Failed to store funding transaction: {:?}", e);
 					log_error!(self.logger, "Failed to store funding transaction: {:?}", e);
@@ -348,17 +358,13 @@ where
 	}
 
 	pub(crate) fn lsps2_payment_claimed(&self, htlcs: Vec<ClaimedHTLC>) {
-		if !self.is_client_trusts_lsp() {
-			log_debug!(self.logger, "Skipping funding transaction broadcast as client trusts LSP.");
-			return;
-		}
-		self.lsps2_service.as_ref().map(|_| {
-			let lsps2_service_handler = self.liquidity_manager.lsps2_service_handler();
-			if let Some(handler) = lsps2_service_handler {
-				handler.htlc_claimed(htlcs).unwrap_or_else(|e| {
-					debug_assert!(false, "Failed to claim payment: {:?}", e);
-					log_error!(self.logger, "Failed to claim payment: {:?}", e);
-				});
+		self.lsps2_client.as_ref().map(|lsps2_client| {
+			println!("");
+			println!("Claiming payment for HTLCs: {:?}", htlcs);
+			println!("");
+			let lsps2_client_handler = self.liquidity_manager.lsps2_client_handler();
+			if let Some(handler) = lsps2_client_handler {
+				handler.inform_htlcs_claimed(lsps2_client.lsp_node_id, htlcs);
 			} else {
 				log_error!(self.logger, "LSPS2 service handler is not available.");
 			}

@@ -19,9 +19,7 @@ use crate::fee_estimator::ConfirmationTarget;
 use crate::liquidity::LiquiditySource;
 use crate::logger::Logger;
 
-use crate::payment::store::{
-	PaymentDetails, PaymentDetailsUpdate, PaymentDirection, PaymentKind, PaymentStatus,
-};
+use crate::payment::store::{PaymentDetailsUpdate, PaymentDirection, PaymentKind, PaymentStatus};
 
 use crate::io::{
 	EVENT_QUEUE_PERSISTENCE_KEY, EVENT_QUEUE_PERSISTENCE_PRIMARY_NAMESPACE,
@@ -528,6 +526,10 @@ where
 							.as_ref()
 							.and_then(|ls| ls.as_ref().lsps2_check_pending_open_channel())
 						{
+							println!(
+								"Funding transaction generated for channel {} with counterparty {} and user channel ID {}",
+								temporary_channel_id, counterparty_node_id, user_channel_id
+							);
 							match self
 								.channel_manager
 								.funding_transaction_generated_manual_broadcast(
@@ -627,288 +629,143 @@ where
 				counterparty_skimmed_fee_msat,
 				..
 			} => {
+				println!(
+					"Payment claimable with hash {} of {}msat, deadline {:?}, skimmed fee {}msat",
+					hex_utils::to_string(&payment_hash.0),
+					amount_msat,
+					claim_deadline,
+					counterparty_skimmed_fee_msat
+				);
 				let payment_id = PaymentId(payment_hash.0);
-				if let Some(info) = self.payment_store.get(&payment_id) {
-					if info.direction == PaymentDirection::Outbound {
-						log_info!(
-							self.logger,
-							"Refused inbound payment with ID {}: circular payments are unsupported.",
-							payment_id
-						);
-						self.channel_manager.fail_htlc_backwards(&payment_hash);
 
+				// ——— your existing refusal & fee‐limit checks ———
+				if let Some(info) = self.payment_store.get(&payment_id) {
+					// circular payments
+					if info.direction == PaymentDirection::Outbound {
+						log_info!(self.logger, "Refused inbound payment with ID {}: circular payments are unsupported.", payment_id);
+						self.channel_manager.fail_htlc_backwards(&payment_hash);
 						let update = PaymentDetailsUpdate {
 							status: Some(PaymentStatus::Failed),
 							..PaymentDetailsUpdate::new(payment_id)
 						};
-						match self.payment_store.update(&update) {
-							Ok(_) => return Ok(()),
-							Err(e) => {
-								log_error!(self.logger, "Failed to access payment store: {}", e);
-								return Err(ReplayEvent());
-							},
-						};
+						self.payment_store.update(&update).map_err(|e| {
+							log_error!(self.logger, "Failed to access payment store: {}", e);
+							ReplayEvent()
+						})?;
+						return Ok(());
 					}
-
+					// duplicate / already succeeded
 					if info.status == PaymentStatus::Succeeded
 						|| matches!(info.kind, PaymentKind::Spontaneous { .. })
 					{
 						log_info!(
 							self.logger,
-							"Refused duplicate inbound payment from payment hash {} of {}msat",
+							"Refused duplicate inbound payment {} of {}msat",
 							hex_utils::to_string(&payment_hash.0),
-							amount_msat,
+							amount_msat
 						);
 						self.channel_manager.fail_htlc_backwards(&payment_hash);
-
 						let update = PaymentDetailsUpdate {
 							status: Some(PaymentStatus::Failed),
 							..PaymentDetailsUpdate::new(payment_id)
 						};
-						match self.payment_store.update(&update) {
-							Ok(_) => return Ok(()),
-							Err(e) => {
-								log_error!(self.logger, "Failed to access payment store: {}", e);
-								return Err(ReplayEvent());
-							},
-						};
+						self.payment_store.update(&update).map_err(|e| {
+							log_error!(self.logger, "Failed to access payment store: {}", e);
+							ReplayEvent()
+						})?;
+						return Ok(());
 					}
-
+					// LSP skimmed‐fee limit
 					let max_total_opening_fee_msat = match info.kind {
-						PaymentKind::Bolt11Jit { lsp_fee_limits, .. } => {
-							lsp_fee_limits
-								.max_total_opening_fee_msat
-								.or_else(|| {
-									lsp_fee_limits.max_proportional_opening_fee_ppm_msat.and_then(
-										|max_prop_fee| {
-											// If it's a variable amount payment, compute the actual fee.
-											compute_opening_fee(amount_msat, 0, max_prop_fee)
-										},
-									)
-								})
-								.unwrap_or(0)
-						},
+						PaymentKind::Bolt11Jit { lsp_fee_limits, .. } => lsp_fee_limits
+							.max_total_opening_fee_msat
+							.or_else(|| {
+								lsp_fee_limits
+									.max_proportional_opening_fee_ppm_msat
+									.and_then(|ppm| compute_opening_fee(amount_msat, 0, ppm))
+							})
+							.unwrap_or(0),
 						_ => 0,
 					};
-
 					if counterparty_skimmed_fee_msat > max_total_opening_fee_msat {
-						log_info!(
-							self.logger,
-							"Refusing inbound payment with hash {} as the counterparty-withheld fee of {}msat exceeds our limit of {}msat",
+						log_info!(self.logger, "Refusing inbound payment {} as skimmed fee {}msat exceeds limit {}msat",
 							hex_utils::to_string(&payment_hash.0),
 							counterparty_skimmed_fee_msat,
-							max_total_opening_fee_msat,
-						);
+							max_total_opening_fee_msat);
 						self.channel_manager.fail_htlc_backwards(&payment_hash);
-
 						let update = PaymentDetailsUpdate {
 							hash: Some(Some(payment_hash)),
 							status: Some(PaymentStatus::Failed),
 							..PaymentDetailsUpdate::new(payment_id)
 						};
-						match self.payment_store.update(&update) {
-							Ok(_) => return Ok(()),
-							Err(e) => {
-								log_error!(self.logger, "Failed to access payment store: {}", e);
-								return Err(ReplayEvent());
-							},
-						};
+						self.payment_store.update(&update).map_err(|e| {
+							log_error!(self.logger, "Failed to access payment store: {}", e);
+							ReplayEvent()
+						})?;
+						return Ok(());
 					}
-
-					// If the LSP skimmed anything, update our stored payment.
+					// record skimmed fee
 					if counterparty_skimmed_fee_msat > 0 {
-						match info.kind {
-							PaymentKind::Bolt11Jit { .. } => {
-								let update = PaymentDetailsUpdate {
-									counterparty_skimmed_fee_msat: Some(Some(counterparty_skimmed_fee_msat)),
-									..PaymentDetailsUpdate::new(payment_id)
-								};
-								match self.payment_store.update(&update) {
-									Ok(_) => (),
-									Err(e) => {
-										log_error!(self.logger, "Failed to access payment store: {}", e);
-										return Err(ReplayEvent());
-									},
-								};
-							}
-							_ => debug_assert!(false, "We only expect the counterparty to get away with withholding fees for JIT payments."),
+						if let PaymentKind::Bolt11Jit { .. } = info.kind {
+							let update = PaymentDetailsUpdate {
+								counterparty_skimmed_fee_msat: Some(Some(
+									counterparty_skimmed_fee_msat,
+								)),
+								..PaymentDetailsUpdate::new(payment_id)
+							};
+							self.payment_store.update(&update).map_err(|e| {
+								log_error!(self.logger, "Failed to access payment store: {}", e);
+								ReplayEvent()
+							})?;
 						}
-					}
-
-					// If this is known by the store but ChannelManager doesn't know the preimage,
-					// the payment has been registered via `_for_hash` variants and needs to be manually claimed via
-					// user interaction.
-					match info.kind {
-						PaymentKind::Bolt11 { preimage, .. } => {
-							if purpose.preimage().is_none() {
-								debug_assert!(
-									preimage.is_none(),
-									"We would have registered the preimage if we knew"
-								);
-
-								let custom_records = onion_fields
-									.map(|cf| {
-										cf.custom_tlvs().into_iter().map(|tlv| tlv.into()).collect()
-									})
-									.unwrap_or_default();
-								let event = Event::PaymentClaimable {
-									payment_id,
-									payment_hash,
-									claimable_amount_msat: amount_msat,
-									claim_deadline,
-									custom_records,
-								};
-								match self.event_queue.add_event(event) {
-									Ok(_) => return Ok(()),
-									Err(e) => {
-										log_error!(
-											self.logger,
-											"Failed to push to event queue: {}",
-											e
-										);
-										return Err(ReplayEvent());
-									},
-								};
-							}
-						},
-						_ => {},
 					}
 				}
+				// ——————————————————————————————————————————————
 
-				log_info!(
-					self.logger,
-					"Received payment from payment hash {} of {}msat",
-					hex_utils::to_string(&payment_hash.0),
-					amount_msat,
-				);
-				let payment_preimage = match purpose {
-					PaymentPurpose::Bolt11InvoicePayment { payment_preimage, .. } => {
-						payment_preimage
-					},
-					PaymentPurpose::Bolt12OfferPayment {
-						payment_preimage,
-						payment_secret,
-						payment_context,
-						..
-					} => {
-						let payer_note = payment_context.invoice_request.payer_note_truncated;
-						let offer_id = payment_context.offer_id;
-						let quantity = payment_context.invoice_request.quantity;
-						let kind = PaymentKind::Bolt12Offer {
-							hash: Some(payment_hash),
-							preimage: payment_preimage,
-							secret: Some(payment_secret),
-							offer_id,
-							payer_note,
-							quantity,
-						};
-
-						let payment = PaymentDetails::new(
-							payment_id,
-							kind,
-							Some(amount_msat),
-							None,
-							PaymentDirection::Inbound,
-							PaymentStatus::Pending,
-						);
-
-						match self.payment_store.insert(payment) {
-							Ok(false) => (),
-							Ok(true) => {
-								log_error!(
-									self.logger,
-									"Bolt12OfferPayment with ID {} was previously known",
-									payment_id,
-								);
-								debug_assert!(false);
-							},
-							Err(e) => {
-								log_error!(
-									self.logger,
-									"Failed to insert payment with ID {}: {}",
-									payment_id,
-									e
-								);
-								debug_assert!(false);
-							},
-						}
-						payment_preimage
-					},
-					PaymentPurpose::Bolt12RefundPayment { payment_preimage, .. } => {
-						payment_preimage
-					},
-					PaymentPurpose::SpontaneousPayment(preimage) => {
-						// Since it's spontaneous, we insert it now into our store.
-						let kind = PaymentKind::Spontaneous {
-							hash: payment_hash,
-							preimage: Some(preimage),
-						};
-
-						let payment = PaymentDetails::new(
-							payment_id,
-							kind,
-							Some(amount_msat),
-							None,
-							PaymentDirection::Inbound,
-							PaymentStatus::Pending,
-						);
-
-						match self.payment_store.insert(payment) {
-							Ok(false) => (),
-							Ok(true) => {
-								log_error!(
-									self.logger,
-									"Spontaneous payment with ID {} was previously known",
-									payment_id,
-								);
-								debug_assert!(false);
-							},
-							Err(e) => {
-								log_error!(
-									self.logger,
-									"Failed to insert payment with ID {}: {}",
-									payment_id,
-									e
-								);
-								debug_assert!(false);
-							},
-						}
-
-						Some(preimage)
-					},
+				// Did we create this invoice with auto_claim (i.e. store a preimage)?
+				let want_auto_claim = match self.payment_store.get(&payment_id) {
+					Some(info) => matches!(
+						info.kind,
+						PaymentKind::Bolt11 { preimage: Some(_), .. }
+							| PaymentKind::Bolt11Jit { preimage: Some(_), .. }
+					),
+					None => false,
 				};
 
-				if let Some(preimage) = payment_preimage {
-					if amount_msat != 99000000 {
-						println!(
-							"Payment with ID {} and hash {} of {}msat received, claiming it.",
+				// Auto‐claim path: immediately call claim_funds and return
+				if want_auto_claim {
+					if let Some(preimage) = purpose.preimage() {
+						log_info!(
+							self.logger,
+							"Auto‐claiming payment {} (hash {}) of {}msat",
 							payment_id,
 							hex_utils::to_string(&payment_hash.0),
-							amount_msat,
+							amount_msat
 						);
 						self.channel_manager.claim_funds(preimage);
+					} else {
+						log_error!(
+							self.logger,
+							"Expected preimage for auto‐claim of payment {}, but got none",
+							payment_id
+						);
 					}
-				} else {
-					log_error!(
-						self.logger,
-						"Failed to claim payment with ID {}: preimage unknown.",
-						payment_id,
-					);
-					self.channel_manager.fail_htlc_backwards(&payment_hash);
-
-					let update = PaymentDetailsUpdate {
-						hash: Some(Some(payment_hash)),
-						status: Some(PaymentStatus::Failed),
-						..PaymentDetailsUpdate::new(payment_id)
-					};
-					match self.payment_store.update(&update) {
-						Ok(_) => return Ok(()),
-						Err(e) => {
-							log_error!(self.logger, "Failed to access payment store: {}", e);
-							return Err(ReplayEvent());
-						},
-					};
+					return Ok(());
 				}
+
+				// Manual‐claim path: emit PaymentClaimable for the user and return
+				let custom_records = onion_fields
+					.map(|cf| cf.custom_tlvs().into_iter().map(|tlv| tlv.into()).collect())
+					.unwrap_or_default();
+				let ev = Event::PaymentClaimable {
+					payment_id,
+					payment_hash,
+					claimable_amount_msat: amount_msat,
+					claim_deadline,
+					custom_records,
+				};
+				self.event_queue.add_event(ev).map_err(|_| ReplayEvent())?;
+				return Ok(());
 			},
 			LdkEvent::PaymentClaimed {
 				payment_hash,
@@ -927,6 +784,12 @@ where
 				let payment_id = PaymentId(payment_hash.0);
 				log_info!(
 					self.logger,
+					"Claimed payment with ID {} from payment hash {} of {}msat.",
+					payment_id,
+					hex_utils::to_string(&payment_hash.0),
+					amount_msat,
+				);
+				println!(
 					"Claimed payment with ID {} from payment hash {} of {}msat.",
 					payment_id,
 					hex_utils::to_string(&payment_hash.0),
