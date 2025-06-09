@@ -1040,9 +1040,9 @@ where
 			LdkEvent::PaymentPathFailed { .. } => {},
 			LdkEvent::ProbeSuccessful { .. } => {},
 			LdkEvent::ProbeFailed { .. } => {},
-			LdkEvent::HTLCHandlingFailed { failed_next_destination, .. } => {
+			LdkEvent::HTLCHandlingFailed { failure_type, .. } => {
 				if let Some(liquidity_source) = self.liquidity_source.as_ref() {
-					liquidity_source.handle_htlc_handling_failed(failed_next_destination);
+					liquidity_source.handle_htlc_handling_failed(failure_type);
 				}
 			},
 			LdkEvent::PendingHTLCsForwardable { time_forwardable } => {
@@ -1159,17 +1159,44 @@ where
 
 				let user_channel_id: u128 = rand::thread_rng().gen::<u128>();
 				let allow_0conf = self.config.trusted_peers_0conf.contains(&counterparty_node_id);
+				let mut channel_override_config = None;
+				if let Some((lsp_node_id, _)) = self
+					.liquidity_source
+					.as_ref()
+					.and_then(|ls| ls.as_ref().get_lsps2_lsp_details())
+				{
+					if lsp_node_id == counterparty_node_id {
+						// When we're an LSPS2 client, allow claiming underpaying HTLCs as the LSP will skim off some fee. We'll
+						// check that they don't take too much before claiming.
+						//
+						// We also set maximum allowed inbound HTLC value in flight
+						// to 100%. We should eventually be able to set this on a per-channel basis, but for
+						// now we just bump the default for all channels.
+						channel_override_config = Some(ChannelConfigOverrides {
+							handshake_overrides: Some(ChannelHandshakeConfigUpdate {
+								max_inbound_htlc_value_in_flight_percent_of_channel: Some(100),
+								..Default::default()
+							}),
+							update_overrides: Some(ChannelConfigUpdate {
+								accept_underpaying_htlcs: Some(true),
+								..Default::default()
+							}),
+						});
+					}
+				}
 				let res = if allow_0conf {
 					self.channel_manager.accept_inbound_channel_from_trusted_peer_0conf(
 						&temporary_channel_id,
 						&counterparty_node_id,
 						user_channel_id,
+						channel_override_config,
 					)
 				} else {
 					self.channel_manager.accept_inbound_channel(
 						&temporary_channel_id,
 						&counterparty_node_id,
 						user_channel_id,
+						channel_override_config,
 					)
 				};
 
