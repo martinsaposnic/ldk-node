@@ -13,7 +13,8 @@ use crate::logger::{log_debug, log_error, log_info, LdkLogger, Logger};
 use crate::types::{ChannelManager, KeysManager, LiquidityManager, PeerManager, Wallet};
 use crate::{total_anchor_channels_reserve_sats, Config, Error};
 
-use lightning::events::HTLCDestination;
+use bitcoin::Transaction;
+use lightning::events::HTLCHandlingFailureType;
 use lightning::ln::channelmanager::{InterceptId, MIN_FINAL_CLTV_EXPIRY_DELTA};
 use lightning::ln::msgs::SocketAddress;
 use lightning::ln::types::ChannelId;
@@ -21,14 +22,16 @@ use lightning::routing::router::{RouteHint, RouteHintHop};
 
 use lightning_invoice::{Bolt11Invoice, Bolt11InvoiceDescription, InvoiceBuilder, RoutingFees};
 
-use lightning_liquidity::events::Event;
-use lightning_liquidity::lsps0::ser::RequestId;
+use lightning_liquidity::events::LiquidityEvent;
+use lightning_liquidity::lsps0::ser::{LSPSDateTime, LSPSRequestId};
 use lightning_liquidity::lsps1::client::LSPS1ClientConfig as LdkLSPS1ClientConfig;
 use lightning_liquidity::lsps1::event::LSPS1ClientEvent;
-use lightning_liquidity::lsps1::msgs::{ChannelInfo, LSPS1Options, OrderId, OrderParameters};
+use lightning_liquidity::lsps1::msgs::{
+	LSPS1ChannelInfo, LSPS1Options, LSPS1OrderId, LSPS1OrderParams,
+};
 use lightning_liquidity::lsps2::client::LSPS2ClientConfig as LdkLSPS2ClientConfig;
 use lightning_liquidity::lsps2::event::{LSPS2ClientEvent, LSPS2ServiceEvent};
-use lightning_liquidity::lsps2::msgs::{OpeningFeeParams, RawOpeningFeeParams};
+use lightning_liquidity::lsps2::msgs::{LSPS2OpeningFeeParams, LSPS2RawOpeningFeeParams};
 use lightning_liquidity::lsps2::service::LSPS2ServiceConfig as LdkLSPS2ServiceConfig;
 use lightning_liquidity::lsps2::utils::compute_opening_fee;
 use lightning_liquidity::{LiquidityClientConfig, LiquidityServiceConfig};
@@ -40,7 +43,7 @@ use bitcoin::secp256k1::{PublicKey, Secp256k1};
 
 use tokio::sync::oneshot;
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 use rand::Rng;
 
@@ -52,7 +55,6 @@ use std::time::Duration;
 const LIQUIDITY_REQUEST_TIMEOUT_SECS: u64 = 5;
 
 const LSPS2_GETINFO_REQUEST_EXPIRY: Duration = Duration::from_secs(60 * 60 * 24);
-const LSPS2_CLIENT_TRUSTS_LSP_MODE: bool = true;
 const LSPS2_CHANNEL_CLTV_EXPIRY_DELTA: u32 = 72;
 
 struct LSPS1Client {
@@ -61,10 +63,10 @@ struct LSPS1Client {
 	token: Option<String>,
 	ldk_client_config: LdkLSPS1ClientConfig,
 	pending_opening_params_requests:
-		Mutex<HashMap<RequestId, oneshot::Sender<LSPS1OpeningParamsResponse>>>,
-	pending_create_order_requests: Mutex<HashMap<RequestId, oneshot::Sender<LSPS1OrderStatus>>>,
+		Mutex<HashMap<LSPSRequestId, oneshot::Sender<LSPS1OpeningParamsResponse>>>,
+	pending_create_order_requests: Mutex<HashMap<LSPSRequestId, oneshot::Sender<LSPS1OrderStatus>>>,
 	pending_check_order_status_requests:
-		Mutex<HashMap<RequestId, oneshot::Sender<LSPS1OrderStatus>>>,
+		Mutex<HashMap<LSPSRequestId, oneshot::Sender<LSPS1OrderStatus>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +133,8 @@ pub struct LSPS2ServiceConfig {
 	pub min_payment_size_msat: u64,
 	/// The maximum payment size that we will accept when opening a channel.
 	pub max_payment_size_msat: u64,
+	/// Use the client trusts lsp model
+	pub client_trusts_lsp: bool,
 }
 
 pub(crate) struct LiquiditySourceBuilder<L: Deref>
@@ -275,12 +279,10 @@ where
 {
 	pub(crate) fn set_peer_manager(&self, peer_manager: Arc<PeerManager>) {
 		*self.peer_manager.write().unwrap() = Some(Arc::clone(&peer_manager));
-		let process_msgs_callback = move || peer_manager.process_events();
-		self.liquidity_manager.set_process_msgs_callback(process_msgs_callback);
 	}
 
-	pub(crate) fn liquidity_manager(&self) -> &LiquidityManager {
-		self.liquidity_manager.as_ref()
+	pub(crate) fn liquidity_manager(&self) -> &Arc<LiquidityManager> {
+		&self.liquidity_manager
 	}
 
 	pub(crate) fn get_lsps1_lsp_details(&self) -> Option<(PublicKey, SocketAddress)> {
@@ -289,6 +291,81 @@ where
 
 	pub(crate) fn get_lsps2_lsp_details(&self) -> Option<(PublicKey, SocketAddress)> {
 		self.lsps2_client.as_ref().map(|s| (s.lsp_node_id, s.lsp_address.clone()))
+	}
+
+	pub(crate) fn lsps2_channel_needs_manual_broadcast(
+		&self, counterparty_node_id: PublicKey, user_channel_id: u128,
+	) -> bool {
+		// if we are not in a client_trusts_lsp model, we don't check and just return false
+		if !self.is_client_trusts_lsp() {
+			log_debug!(self.logger, "Skipping funding transaction broadcast as client trusts LSP.");
+			return false;
+		}
+
+		// if we are in a client_trusts_lsp model, then we check if the LSP has an LSPS2 operation in progress
+		self.lsps2_service.as_ref().map_or(false, |_| {
+			let lsps2_service_handler = self.liquidity_manager.lsps2_service_handler();
+			if let Some(handler) = lsps2_service_handler {
+				handler
+					.channel_needs_manual_broadcast(user_channel_id, &counterparty_node_id)
+					.unwrap_or(false)
+			} else {
+				log_error!(self.logger, "LSPS2 service handler is not available.");
+				false
+			}
+		})
+	}
+
+	pub(crate) fn lsps2_store_funding_transaction(
+		&self, user_channel_id: u128, counterparty_node_id: PublicKey, funding_tx: Transaction,
+	) {
+		if !self.is_client_trusts_lsp() {
+			log_debug!(self.logger, "Skipping funding transaction broadcast as client trusts LSP.");
+			return;
+		}
+		self.lsps2_service.as_ref().map(|_| {
+			let lsps2_service_handler = self.liquidity_manager.lsps2_service_handler();
+			if let Some(handler) = lsps2_service_handler {
+				handler
+					.store_funding_transaction(user_channel_id, &counterparty_node_id, funding_tx)
+					.unwrap_or_else(|e| {
+						debug_assert!(false, "Failed to store funding transaction: {:?}", e);
+						log_error!(self.logger, "Failed to store funding transaction: {:?}", e);
+					});
+			} else {
+				log_error!(self.logger, "LSPS2 service handler is not available.");
+			}
+		});
+	}
+
+	pub(crate) fn lsps2_funding_tx_broadcast_safe(
+		&self, user_channel_id: u128, counterparty_node_id: PublicKey,
+	) {
+		if !self.is_client_trusts_lsp() {
+			log_debug!(self.logger, "Skipping funding transaction broadcast as client trusts LSP.");
+			return;
+		}
+		self.lsps2_service.as_ref().map(|_| {
+			let lsps2_service_handler = self.liquidity_manager.lsps2_service_handler();
+			if let Some(handler) = lsps2_service_handler {
+				handler
+					.funding_tx_broadcast_safe(user_channel_id, &counterparty_node_id)
+					.unwrap_or_else(|e| {
+						debug_assert!(false, "Failed to store funding transaction: {:?}", e);
+						log_error!(self.logger, "Failed to store funding transaction: {:?}", e);
+					});
+			} else {
+				log_error!(self.logger, "LSPS2 service handler is not available.");
+			}
+		});
+	}
+
+	fn is_client_trusts_lsp(&self) -> bool {
+		if let Some(lsps2_service) = self.lsps2_service.as_ref() {
+			lsps2_service.service_config.client_trusts_lsp
+		} else {
+			false
+		}
 	}
 
 	pub(crate) async fn handle_next_event(&self) {
@@ -579,7 +656,7 @@ where
 						request_id,
 						intercept_scid,
 						LSPS2_CHANNEL_CLTV_EXPIRY_DELTA,
-						LSPS2_CLIENT_TRUSTS_LSP_MODE,
+						service_config.client_trusts_lsp,
 						user_channel_id,
 					) {
 						Ok(()) => {},
