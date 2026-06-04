@@ -27,6 +27,7 @@ use common::{
 	wait_for_tx, TestChainSource, TestConfig, TestStoreType, TestSyncStore,
 };
 use electrsd::corepc_node::Node as BitcoinD;
+use electrsd::electrum_client::ElectrumApi;
 use electrsd::ElectrsD;
 use ldk_node::config::{AsyncPaymentsRole, EsploraSyncConfig};
 use ldk_node::entropy::NodeEntropy;
@@ -167,6 +168,181 @@ async fn channel_full_cycle_0conf_0reserve() {
 		false,
 	)
 	.await;
+}
+
+// Demonstrates that `create_funding_transaction` never applies the built-and-signed funding
+// transaction back to the on-chain (BDK) wallet, so the inputs it selected remain selectable
+// until the next chain/mempool sync round-trip. Consequently, two channel opens that happen
+// between two wallet syncs build funding transactions that double-spend the same UTXO(s).
+//
+// With 0-conf channels this is especially nasty: both channels go `ChannelReady` immediately,
+// but only one funding transaction can ever enter the mempool. The other one is rejected by
+// bitcoind at broadcast time (HTTP 400, `txn-mempool-conflict`), which the Esplora broadcaster
+// logs at `trace` level and otherwise ignores. The losing channel remains "ready" and usable
+// while being completely unbacked on-chain: a phantom channel whose eventual commitment
+// transaction can never confirm (`bad-txns-inputs-missingorspent`).
+//
+// This test asserts the *current* (buggy) behavior to prove the issue exists. Once funding
+// inputs are properly marked as spent at build time (e.g. via `Wallet::apply_unconfirmed_txs`),
+// the second `open_channel` below should fail with `Error::InsufficientFunds` instead, and
+// this test will need to be inverted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn zero_conf_channel_funding_tx_double_spend() {
+	let (bitcoind, electrsd) = setup_bitcoind_and_electrsd();
+	let chain_source = TestChainSource::Esplora(&electrsd);
+
+	// Node A is the funder. Nodes B and C trust node A for 0-conf channels.
+	println!("== Node A ==");
+	let config_a = random_config(false);
+	let node_a = setup_node(&chain_source, config_a);
+
+	println!("\n== Node B ==");
+	let mut config_b = random_config(false);
+	config_b.node_config.trusted_peers_0conf.push(node_a.node_id());
+	let node_b = setup_node(&chain_source, config_b);
+
+	println!("\n== Node C ==");
+	let mut config_c = random_config(false);
+	config_c.node_config.trusted_peers_0conf.push(node_a.node_id());
+	let node_c = setup_node(&chain_source, config_c);
+
+	// Give node A exactly ONE UTXO. Every funding transaction node A builds *must* spend it,
+	// so any two funding transactions built from the same wallet state are double-spends of
+	// each other by construction.
+	let premine_amount_sat = 100_000;
+	let addr_a = node_a.onchain_payment().new_address().unwrap();
+	premine_blocks(&bitcoind.client, &electrsd.client).await;
+	let utxo_txid = distribute_funds_unconfirmed(
+		&bitcoind.client,
+		&electrsd.client,
+		vec![addr_a.clone()],
+		Amount::from_sat(premine_amount_sat),
+	)
+	.await;
+	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 1).await;
+	node_a.sync_wallets().unwrap();
+	assert_eq!(node_a.list_balances().spendable_onchain_balance_sats, premine_amount_sat);
+
+	let utxo_tx = electrsd.client.transaction_get(&utxo_txid).unwrap();
+	let utxo_vout = utxo_tx
+		.output
+		.iter()
+		.position(|o| o.script_pubkey == addr_a.script_pubkey())
+		.expect("premined output to node A not found");
+	let utxo_outpoint = bitcoin::OutPoint { txid: utxo_txid, vout: utxo_vout as u32 };
+
+	// Two channels of 70k sats each require 140k sats total, but node A only owns 100k sats.
+	// No two valid, non-conflicting funding transactions can exist for these amounts.
+	let funding_amount_sat = 70_000;
+
+	// Open the first 0-conf channel A -> B and wait until its funding transaction is in the
+	// mempool. There is no race here: the second funding transaction below is built strictly
+	// *after* the first one was broadcast and accepted.
+	println!("\nA -- open_channel -> B");
+	node_a
+		.open_channel(
+			node_b.node_id(),
+			node_b.listening_addresses().unwrap().first().unwrap().clone(),
+			funding_amount_sat,
+			None,
+			None,
+		)
+		.unwrap();
+	let funding_txo_b = expect_channel_pending_event!(node_a, node_b.node_id());
+	expect_channel_pending_event!(node_b, node_a.node_id());
+	wait_for_tx(&electrsd.client, funding_txo_b.txid).await;
+
+	// 0-conf: the channel is ready without a single confirmation.
+	expect_channel_ready_event!(node_a, node_b.node_id());
+	expect_channel_ready_event!(node_b, node_a.node_id());
+
+	// The first funding transaction spends node A's only UTXO.
+	let funding_tx_b = electrsd.client.transaction_get(&funding_txo_b.txid).unwrap();
+	assert_eq!(funding_tx_b.input.len(), 1);
+	assert_eq!(funding_tx_b.input[0].previous_output, utxo_outpoint);
+
+	// NOTE: We deliberately do NOT call `node_a.sync_wallets()` here. Nothing else marks the
+	// just-spent UTXO as spent: `create_funding_transaction` doesn't apply the transaction to
+	// the wallet, so the wallet only learns about the spend when a sync pulls the transaction
+	// back from the chain source. In production this window lasts until the next background
+	// sync completes.
+
+	// Open the second 0-conf channel A -> C. Node A has already committed its only UTXO to the
+	// first channel, so with correct input accounting this MUST fail with
+	// `Error::InsufficientFunds` (only ~30k sats of unconfirmed change remain). Instead, the
+	// stale wallet still reports 100k sats spendable and happily double-spends the same UTXO.
+	println!("\nA -- open_channel -> C");
+	node_a
+		.open_channel(
+			node_c.node_id(),
+			node_c.listening_addresses().unwrap().first().unwrap().clone(),
+			funding_amount_sat,
+			None,
+			None,
+		)
+		.unwrap();
+	let funding_txo_c = expect_channel_pending_event!(node_a, node_c.node_id());
+	expect_channel_pending_event!(node_c, node_a.node_id());
+	assert_ne!(funding_txo_b.txid, funding_txo_c.txid);
+
+	// The second channel also goes `ChannelReady` at 0-conf, although its funding transaction
+	// is a double-spend that can never confirm.
+	expect_channel_ready_event!(node_a, node_c.node_id());
+	expect_channel_ready_event!(node_c, node_a.node_id());
+
+	// Node A now has channels worth more than everything it ever owned on-chain.
+	let total_channel_value_sats: u64 =
+		node_a.list_channels().iter().map(|c| c.channel_value_sats).sum();
+	assert_eq!(total_channel_value_sats, 2 * funding_amount_sat);
+	assert!(total_channel_value_sats > premine_amount_sat);
+
+	// The second funding transaction was handed to the broadcaster, but bitcoind rejects it as
+	// a mempool conflict. The Esplora broadcaster swallows the HTTP 400 at `trace` level, so
+	// the transaction silently evaporates: it never enters the mempool.
+	tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+	let mempool = bitcoind.client.get_raw_mempool().unwrap().into_model().unwrap();
+	assert!(
+		mempool.0.iter().any(|txid| *txid == funding_txo_b.txid),
+		"First funding tx should be in the mempool"
+	);
+	assert!(
+		!mempool.0.iter().any(|txid| *txid == funding_txo_c.txid),
+		"Second funding tx should have been rejected as a double-spend"
+	);
+
+	// Mine blocks: the first channel confirms, the second one never can.
+	generate_blocks_and_wait(&bitcoind.client, &electrsd.client, 6).await;
+	node_a.sync_wallets().unwrap();
+	node_b.sync_wallets().unwrap();
+	node_c.sync_wallets().unwrap();
+
+	assert!(
+		electrsd.client.transaction_get(&funding_txo_c.txid).is_err(),
+		"Second funding tx must not exist on-chain"
+	);
+
+	let channel_a_b = node_a
+		.list_channels()
+		.into_iter()
+		.find(|c| c.counterparty_node_id == node_b.node_id())
+		.unwrap();
+	assert!(channel_a_b.confirmations.unwrap() >= 6);
+
+	// The losing channel is a phantom: still "ready" and usable, holding 70k sats that are
+	// backed by nothing on-chain. Its funding outpoint does not and will never exist, so any
+	// commitment transaction spending it bounces with `bad-txns-inputs-missingorspent`.
+	let channel_a_c = node_a
+		.list_channels()
+		.into_iter()
+		.find(|c| c.counterparty_node_id == node_c.node_id())
+		.unwrap();
+	assert!(channel_a_c.is_channel_ready);
+	assert!(channel_a_c.is_usable);
+	assert_eq!(channel_a_c.confirmations, Some(0));
+
+	node_a.stop().unwrap();
+	node_b.stop().unwrap();
+	node_c.stop().unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
